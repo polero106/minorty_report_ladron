@@ -1,0 +1,13 @@
+# Conexión con Base de Datos
+neo4j>=5.0.0
+
+# Deep Learning y Grafos
+torch>=2.0.0
+torch-geometric>=2.3.0
+
+# Manipulación de Datos (ETL)
+pandas
+numpy
+
+# Gestión de contraseñas (Opcional pero recomendado)
+python-dotenv
