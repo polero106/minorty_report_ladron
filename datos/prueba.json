@@ -1,0 +1,25 @@
+{
+  "personas": [
+    {"id": "P001", "nombre": "John Anderton", "historial": "Limio", "rol": "Policía"},
+    {"id": "P002", "nombre": "Lamar Burgess", "historial": "Corrupto", "rol": "Director"},
+    {"id": "P003", "nombre": "Howard Marks", "historial": "Robo Agravado", "rol": "Criminal"},
+    {"id": "P004", "nombre": "Leo Crow", "historial": "Estafa", "rol": "Victima"}
+  ],
+  "ubicaciones": [
+    {"id": "L001", "distrito": "Distrito Federal", "coordenadas": [38.907, -77.036], "peligro": 0.2},
+    {"id": "L002", "distrito": "The Sprawl", "coordenadas": [38.895, -77.036], "peligro": 0.9},
+    {"id": "L003", "distrito": "Templo Precog", "coordenadas": [38.889, -77.009], "peligro": 0.0}
+  ],
+  "crimenes_futuros": [
+    {"id": "C001", "tipo": "Homicidio", "violencia": 0.95, "timestamp": "2054-04-20T14:30:00"},
+    {"id": "C002", "tipo": "Robo", "violencia": 0.40, "timestamp": "2054-04-21T09:00:00"}
+  ],
+  "relaciones": [
+    {"source": "P003", "target": "C002", "tipo": "WILL_COMMIT", "probabilidad": 0.88},
+    {"source": "P001", "target": "C001", "tipo": "WILL_COMMIT", "probabilidad": 0.99},
+    {"source": "C001", "target": "L002", "tipo": "OCCURS_IN"},
+    {"source": "C002", "target": "L001", "tipo": "OCCURS_IN"},
+    {"source": "P003", "target": "P004", "tipo": "CONOCE_A", "peso": 0.5},
+    {"source": "P001", "target": "P002", "tipo": "CONOCE_A", "peso": 0.9}
+  ]
+}
