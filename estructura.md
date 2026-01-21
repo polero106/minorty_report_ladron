@@ -1,33 +1,47 @@
-criminal-graph-gan/
+pre-crime-graph-analysis/
+├── .env                        # Variables de entorno (Credenciales Neo4j, API Keys)
+├── .gitignore
+├── README.md
+├── requirements.txt            # Dependencias (fastapi, neo4j, torch, torch-geometric)
+├── main.py                     # Punto de entrada de la aplicación FastAPI
 │
-├── config/
-│   ├── config.yaml          # Hiperparámetros (learning rate, epochs, hidden dim)
-│   └── database.ini         # Credenciales de Neo4j (URI, usuario, password)
-│
-├── data/
-│   ├── raw/                 # Datasets iniciales (ej. Elliptic, Cora o sintéticos)
-│   └── processed/           # Grafos procesados listos para PyTorch Geometric
-│
-├── src/
+├── app/
 │   ├── __init__.py
-│   ├── database/
-│   │   ├── connector.py     # Clase para conectar con Neo4j (Driver)
-│   │   └── graph_loader.py  # Extrae subgrafos de Neo4j a objetos PyG Data
+│   ├── config.py               # Configuración global (Settings)
 │   │
-│   ├── models/
-│   │   ├── layers.py        # Definición de capas personalizadas
-│   │   ├── generator.py     # El "Agente Criminal" (GraphSAGE + MLP)
-│   │   └── discriminator.py # El "Agente Policial" (GraphSAGE + Clasificador)
+│   ├── api/                    # Capa de API (FastAPI)
+│   │   ├── __init__.py
+│   │   ├── routes.py           # Endpoints (e.g., /predict/risk, /analyze/suspect)
+│   │   └── schemas.py          # Modelos Pydantic (Request/Response bodies)
 │   │
-│   ├── training/
-│   │   ├── gan_loss.py      # Funciones de pérdida (Adversarial + Camuflaje)
-│   │   └── trainer.py       # Bucle de entrenamiento Minimax
+│   ├── database/               # Capa de Datos (Neo4j)
+│   │   ├── __init__.py
+│   │   ├── connection.py       # Gestión del Driver de Neo4j
+│   │   └── repository.py       # Queries Cypher (MATCH (p:Person)...)
 │   │
-│   └── utils/
-│       ├── visualization.py # Scripts para colorear nodos en Neo4j según riesgo
-│       └── metrics.py       # Precisión, Recall, Indistinguibilidad
+│   ├── ml/                     # Capa de Machine Learning (Deep Learning Geométrico)
+│   │   ├── __init__.py
+│   │   ├── dataset_loader.py   # Convierte datos de Neo4j a objetos 'Data' de PyG
+│   │   │
+│   │   ├── models/             # Definiciones de Arquitecturas Neuronales
+│   │   │   ├── __init__.py
+│   │   │   ├── gat.py          # Clase PreCrimeGAT (Atención)
+│   │   │   ├── graphsage.py    # Clase PreCrimeSAGE (Inductivo/Embeddings)
+│   │   │   └── gan.py          # Clases Generator & Discriminator (Adversarial)
+│   │   │
+│   │   └── pipelines/          # Lógica de entrenamiento e inferencia
+│   │       ├── __init__.py
+│   │       ├── training.py     # Scripts de entrenamiento de modelos
+│   │       └── inference.py    # Carga modelos guardados para predecir en tiempo real
+│   │
+│   └── services/               # Lógica de Negocio (Orquestador)
+│       ├── __init__.py
+│       └── precrime_service.py # Une la DB y el ML para dar respuesta a la API
 │
-├── notebooks/               # Jupyter notebooks para prototipado rápido
-├── main.py                  # Punto de entrada para ejecutar el entrenamiento
-├── requirements.txt         # Dependencias (torch, torch-geometric, neo4j)
-└── README.md
+├── data/                       # Almacenamiento local de datos
+│   ├── raw/                    # CSVs o JSONs originales (Minority Report data)
+│   └── processed/              # Grafos procesados o modelos entrenados (.pth)
+│
+└── notebooks/                  # Jupyter Notebooks para experimentación y EDA
+    ├── 01_data_loading.ipynb
+    └── 02_model_prototyping.ipynb
