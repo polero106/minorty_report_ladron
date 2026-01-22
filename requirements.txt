@@ -11,3 +11,5 @@ numpy
 
 # Gestión de contraseñas (Opcional pero recomendado)
 python-dotenv
+
+faker
