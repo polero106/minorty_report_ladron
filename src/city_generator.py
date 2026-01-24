@@ -1,6 +1,8 @@
 import time
 import random
 import numpy as np
+import osmnx as ox
+import networkx as nx
 from faker import Faker
 from neo4j import GraphDatabase
 
@@ -12,26 +14,31 @@ class CityGenerator:
     def __init__(self, uri, auth):
         self.driver = GraphDatabase.driver(uri, auth=auth)
         self.fake = Faker('es_ES') # Datos en español
-        print("🔌 Conectado a la Matrix (Neo4j)")
+        print("Descargando grafo de calles de Madrid (Distrito Centro)...")
+        # Usamos 'network_type=drive' o 'walk' para obtener nodos de calles
+        self.G = ox.graph_from_place('Centro, Madrid, Spain', network_type='all')
+        self.nodes = list(self.G.nodes(data=True)) # Lista de (id, data)
+        print(f"Conectado a la Matrix. Grafo cargado con {len(self.nodes)} nodos.")
 
     def close(self):
         self.driver.close()
 
-    def generate_3d_point(self, scale=100):
-        """Genera coordenadas x, y, z para la visualización 3D"""
+    def get_random_point_on_street(self):
+        """Selecciona un nodo aleatorio del grafo de calles de Madrid."""
+        node_id, data = random.choice(self.nodes)
         return {
-            'x': float(np.random.uniform(-scale, scale)),
-            'y': float(np.random.uniform(-scale, scale)),
-            'z': float(np.random.uniform(0, scale/2)) # Altura (edificios/niveles)
+            'x': data['x'], # Longitude
+            'y': data['y'], # Latitude
+            'z': float(np.random.uniform(0, 50)) # Altura simulada para 3D
         }
 
     def generate_data(self, num_personas=1000, num_ubicaciones=50):
-        print(f"🏗️  Fabricando ciudad con {num_personas} ciudadanos y {num_ubicaciones} zonas...")
+        print(f"Fabricando ciudad con {num_personas} ciudadanos y {num_ubicaciones} zonas...")
         
         # 1. GENERAR UBICACIONES (BOLAS AMARILLAS)
         ubicaciones = []
         for i in range(num_ubicaciones):
-            coords = self.generate_3d_point()
+            coords = self.get_random_point_on_street()
             ubicaciones.append({
                 'id': f"LOC_{i:03d}",
                 'nombre': self.fake.street_name(),
@@ -51,7 +58,7 @@ class CityGenerator:
             risk_seed = np.random.normal(0.3, 0.15) 
             risk_seed = np.clip(risk_seed, 0.0, 1.0) # Forzar entre 0 y 1
 
-            coords = self.generate_3d_point(scale=10) # Las personas aparecen cerca del centro o dispersas
+            coords = self.get_random_point_on_street()
             
             personas.append({
                 'id': f"P_{i:05d}",
@@ -71,7 +78,7 @@ class CityGenerator:
         
         for crim in criminales:
             if random.random() > 0.3: # No todos son atrapados
-                coords = self.generate_3d_point()
+                coords = self.get_random_point_on_street() # Crimen en lugar real
                 warnings.append({
                     'id': f"WARN_{random.randint(0, 99999)}",
                     'delito': random.choice(['Robo', 'Agresión', 'Fraude', 'Homicidio']),
@@ -87,7 +94,7 @@ class CityGenerator:
         return personas, ubicaciones, warnings
 
     def save_to_neo4j(self, personas, ubicaciones, warnings):
-        print("💾 Guardando en Neo4j usando UNWIND (Bulk Import)...")
+        print("Guardando en Neo4j usando UNWIND (Bulk Import)...")
         start_time = time.time()
 
         with self.driver.session() as session:
@@ -98,6 +105,7 @@ class CityGenerator:
             SET u.nombre = row.nombre, 
                 u.peligrosidad = row.peligrosidad,
                 u.x = row.x, u.y = row.y, u.z = row.z,
+                u.lat = row.y, u.lon = row.x,
                 u.color = row.color
             """, batch=ubicaciones)
             print(f"   -> {len(ubicaciones)} Ubicaciones creadas.")
@@ -109,7 +117,8 @@ class CityGenerator:
             SET p.nombre = row.nombre, 
                 p.edad = row.edad, 
                 p.risk_seed = row.risk_seed,
-                p.x = row.x, p.y = row.y, p.z = row.z
+                p.x = row.x, p.y = row.y, p.z = row.z,
+                p.lat = row.y, p.lon = row.x
             """, batch=personas)
             print(f"   -> {len(personas)} Personas creadas.")
 
@@ -131,6 +140,7 @@ class CityGenerator:
                 w.gravedad = row.gravedad,
                 w.fecha = row.fecha,
                 w.x = row.x, w.y = row.y, w.z = row.z,
+                w.lat = row.y, w.lon = row.x,
                 w.color = row.color
             MERGE (p)-[:COMETIO]->(w)
             """, batch=warnings)
@@ -140,12 +150,12 @@ class CityGenerator:
             # (El crimen ocurrió cerca de una ubicación)
             session.run("""
             MATCH (w:Warning), (u:Ubicacion)
-            WHERE abs(w.x - u.x) < 20 AND abs(w.y - u.y) < 20
+            WHERE abs(w.x - u.x) < 0.005 AND abs(w.y - u.y) < 0.005 // Distancia Lat/Lon pequeña
             MERGE (w)-[:OCURRIO_EN]->(u)
             """)
 
         end_time = time.time()
-        print(f"✅ Todo listo en {end_time - start_time:.2f} segundos.")
+        print(f"Todo listo en {end_time - start_time:.2f} segundos.")
 
 if __name__ == "__main__":
     # 1. Instanciar Generador

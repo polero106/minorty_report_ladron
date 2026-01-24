@@ -9,7 +9,19 @@ torch-geometric>=2.3.0
 pandas
 numpy
 
-# Gestión de contraseñas (Opcional pero recomendado)
-python-dotenv
+# Geoespacial y Grafos de Calles
+osmnx
+networkx
 
+# Visualización y Dashboard
+panel
+hvplot
+geoviews
+mapbox
+pydeck
+streamlit
+watchdog
+
+# Utilities
+python-dotenv
 faker
