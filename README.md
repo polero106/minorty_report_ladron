@@ -7,6 +7,36 @@ El objetivo es modelar una "carrera armamentista" entre criminales y policías e
 - **CriminalNet (Generador):** Intenta crear nuevas conexiones ilícitas (aristas) que pasen desapercibidas.
 - **PoliceNet (Discriminador):** Intenta clasificar nodos y conexiones como "Seguros" o "Criminales".
 
+## 🚀 Inicio Rápido
+
+### 📖 Ver [ORDEN_EJECUCION.md](ORDEN_EJECUCION.md) para instrucciones completas
+
+**Resumen del flujo:**
+
+1. **Generar ciudad sintética con datos reales de Madrid:**
+   ```bash
+   python src/city_generator.py
+   ```
+
+2. **Entrenar el modelo GAN:**
+   ```bash
+   python src/entrenamiento_gan.py
+   ```
+
+3. **Visualizar predicciones en dashboard 3D:**
+   ```bash
+   panel serve viz/dashboard_madrid_3d.py --show --port 5006
+   ```
+
+## ⚠️ Importante: Nuevo Sistema de Coordenadas
+
+**A partir de la última actualización, el sistema trabaja con coordenadas REALES de Madrid** obtenidas de OpenStreetMap:
+
+- ✅ **USAR:** `src/data_loader.py` - Carga datos con coordenadas reales
+- ❌ **NO USAR:** `src/etl_policial.py` - OBSOLETO (normalizaba coordenadas)
+
+Si tienes un modelo `agente_precrime.pth` antiguo, debes **re-entrenarlo** con el nuevo sistema.
+
 ## 🎯 Roles
 ### El Criminal (Generador)
 - **Objetivo:** Generar ataques adversariales (nuevas aristas/nodos) que engañen a la policía.

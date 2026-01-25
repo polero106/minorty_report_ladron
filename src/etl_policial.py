@@ -1,3 +1,19 @@
+"""
+⚠️ ARCHIVO OBSOLETO - NO USAR ⚠️
+
+Este archivo está DEPRECADO desde la introducción del nuevo city_generator.py
+que usa coordenadas reales de OpenStreetMap.
+
+USAR EN SU LUGAR: data_loader.py
+
+Este archivo normalizaba coordenadas [0,1] pero el nuevo sistema trabaja
+con coordenadas reales de Madrid (lat: 40.30-40.55, lon: -3.85 a -3.50).
+
+Se mantiene solo para referencia histórica.
+---------------------------------------------------------------------------
+
+Antiguo ETL - Carga datos desde Neo4j con normalización de coordenadas.
+"""
 
 import torch
 from neo4j import GraphDatabase
