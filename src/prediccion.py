@@ -5,10 +5,10 @@ import os
 import pandas as pd
 from dotenv import load_dotenv
 
-# Configuración de rutas para importar ETL
+# Configuración de rutas para importar módulos locales
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from torch_geometric.nn import SAGEConv, HeteroConv
-from etl_policial import PoliceETL
+from data_loader import MadridDataLoader
 
 load_dotenv()
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -67,10 +67,11 @@ def ejecutar_prediccion():
     AUTH = ("neo4j", os.getenv("NEO4J_PASSWORD", "oTzaPYT99TgH-GM2APk0gcFlf9k16wrTcVOhtfmAyyA"))
     
     print("   -> Conectando con la base de datos...")
-    etl = PoliceETL(URI, AUTH)
-    etl.load_nodes()
-    etl.load_edges()
-    data = etl.get_data().to(device)
+    loader = MadridDataLoader(URI, AUTH)
+    loader.load_nodes()
+    loader.load_edges()
+    data = loader.get_data().to(device)
+    loader.close()
     
     # 2. Cargar el Modelo Entrenado (Discriminador + Encoder)
     models_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'models')

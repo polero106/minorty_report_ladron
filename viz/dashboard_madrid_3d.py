@@ -1,4 +1,3 @@
-
 import panel as pn
 import pydeck as pdk
 import pandas as pd
@@ -12,16 +11,10 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.prediction_service import PredictionService
 
 # ==============================================================================
-# 0. CONSTANTES (Deben coincidir con ETL)
+# 0. CONFIGURACIÓN - Trabajamos con coordenadas REALES (no normalizadas)
 # ==============================================================================
-LAT_MIN, LAT_MAX = 40.30, 40.55
-LON_MIN, LON_MAX = -3.85, -3.50
-
-def denormalize_lat(y): 
-    return y * (LAT_MAX - LAT_MIN) + LAT_MIN
-
-def denormalize_lon(x): 
-    return x * (LON_MAX - LON_MIN) + LON_MIN
+# El nuevo city_generator.py guarda coordenadas reales en Neo4j
+# Por lo tanto, NO necesitamos denormalizar
 
 # Mapeo Ficticio de Barrios
 BARRIOS = {
@@ -76,21 +69,21 @@ TOOLTIP_CONFIG = {
 
 # Preparar capas iniciales
 if service:
-    # Extraemos datos a CPU y DENORMALIZAMOS
+    # Extraemos datos a CPU - COORDENADAS REALES (ya no normalizadas)
     x_pers = service.data['Persona'].x.cpu().numpy()
     x_locs = service.data['Ubicacion'].x.cpu().numpy()
     
-    # Índices: 0=Risk/Danger, 1=Lat, 2=Lon
+    # Índices: 0=Risk/Danger, 1=Lat, 2=Lon (COORDENADAS REALES)
     df_personas_base = pd.DataFrame({
-        'lat': denormalize_lat(x_pers[:, 1]),
-        'lon': denormalize_lon(x_pers[:, 2]),
+        'lat': x_pers[:, 1],  # Ya son coordenadas reales
+        'lon': x_pers[:, 2],  # Ya son coordenadas reales
         'tipo': 'Persona',
         'id_visual': [f'P_{i}' for i in range(len(x_pers))]
     })
     
     df_ubicaciones_base = pd.DataFrame({
-        'lat': denormalize_lat(x_locs[:, 1]),
-        'lon': denormalize_lon(x_locs[:, 2]),
+        'lat': x_locs[:, 1],  # Ya son coordenadas reales
+        'lon': x_locs[:, 2],  # Ya son coordenadas reales
         'tipo': 'Ubicación',
         'id_visual': [f'{get_barrio_name(f"U_{i}")}' for i in range(len(x_locs))]
     })

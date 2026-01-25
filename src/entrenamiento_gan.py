@@ -9,7 +9,7 @@ import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from torch_geometric.nn import SAGEConv, HeteroConv
-from etl_policial import PoliceETL
+from data_loader import MadridDataLoader
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -99,10 +99,11 @@ def entrenar_policia():
     URI = os.getenv("NEO4J_URI", "neo4j+ssc://5d9c9334.databases.neo4j.io")
     AUTH = ("neo4j", os.getenv("NEO4J_PASSWORD", "oTzaPYT99TgH-GM2APk0gcFlf9k16wrTcVOhtfmAyyA"))
     
-    etl = PoliceETL(URI, AUTH)
-    etl.load_nodes()
-    etl.load_edges()
-    data = etl.get_data().to(device)
+    loader = MadridDataLoader(URI, AUTH)
+    loader.load_nodes()
+    loader.load_edges()
+    data = loader.get_data().to(device)
+    loader.close()
 
     # --- PREPARAR GROUND TRUTH (CRÍMENES REALES) ---
     print("   -> Construyendo dataset de crímenes reales...")

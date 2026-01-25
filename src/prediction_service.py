@@ -10,8 +10,8 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Importamos las capas de grafo necesarias
 from torch_geometric.nn import SAGEConv, HeteroConv
-# Usamos PoliceETL SOLO para cargar los datos de Neo4j
-from etl_policial import PoliceETL
+# Usamos MadridDataLoader para cargar los datos de Neo4j
+from data_loader import MadridDataLoader
 
 load_dotenv()
 
@@ -71,10 +71,10 @@ class PredictionService:
         
         # 2. Cargar Datos del Grafo (Snapshot actual)
         print("   -> Loading graph data from Neo4j...")
-        self.etl = PoliceETL(self.uri, self.auth)
-        self.etl.load_nodes()
-        self.etl.load_edges()
-        self.data = self.etl.get_data().to(self.device)
+        self.loader = MadridDataLoader(self.uri, self.auth)
+        self.loader.load_nodes()
+        self.loader.load_edges()
+        self.data = self.loader.get_data().to(self.device)
         
         # 3. Cargar Modelos
         print("   -> Loading pre-trained models...")
@@ -140,23 +140,20 @@ class PredictionService:
                         u_real_idx = high_danger_indices[idx]
                         prob = probs[idx].item()
                         
-                        # Recuperar IDs originales y Coordenadas
-                        # Nota: El ETL guarda mapas de ID originales, pero aquí usaremos indices
-                        # Recuperamos Lat/Lon de los features normalizados (indices 1 y 2)
-                        # OJO: Para visualización real necesitaríamos des-normalizar si las guardamos normalizadas.
-                        # Asumiremos que el ETL las tiene en raw en alguna parte o que data.x tiene lat/lon usables.
-                        # Para este ejemplo, usaremos las lat/lon que el ETL cargó en los tensores.
+                        # Recuperar IDs originales y Coordenadas REALES
+                        # Las coordenadas ya están en formato real (lat ~40.x, lon ~-3.x)
+                        # Feature Vector: [value, lat_real, lon_real]
                         
                         predictions.append({
                             "id_sujeto": f"P_{p_idx.item()}",
                             "riesgo_sujeto": x_personas_cpu[p_idx, 0].item(),
-                            "lat_sujeto": x_personas_cpu[p_idx, 1].item(), # Asumiendo idx 1 es Lat
-                            "lon_sujeto": x_personas_cpu[p_idx, 2].item(), # Asumiendo idx 2 es Lon
+                            "lat_sujeto": x_personas_cpu[p_idx, 1].item(),  # Lat Real
+                            "lon_sujeto": x_personas_cpu[p_idx, 2].item(),  # Lon Real
                             
                             "id_ubicacion": f"U_{u_real_idx.item()}",
                             "peligrosidad_zona": x_ubicaciones_cpu[u_real_idx, 0].item(),
-                            "lat_ubicacion": x_ubicaciones_cpu[u_real_idx, 1].item(),
-                            "lon_ubicacion": x_ubicaciones_cpu[u_real_idx, 2].item(),
+                            "lat_ubicacion": x_ubicaciones_cpu[u_real_idx, 1].item(),  # Lat Real
+                            "lon_ubicacion": x_ubicaciones_cpu[u_real_idx, 2].item(),  # Lon Real
                             
                             "probabilidad": prob
                         })
