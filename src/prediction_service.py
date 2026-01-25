@@ -10,7 +10,8 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Importamos las capas de grafo necesarias
 from torch_geometric.nn import SAGEConv, HeteroConv
-from src.etl_policial import PoliceETL
+from etl_policial import PoliceETL
+from city_generator import CityGenerator
 
 load_dotenv()
 
@@ -68,7 +69,20 @@ class PredictionService:
         self.uri = os.getenv("NEO4J_URI", "neo4j+ssc://5d9c9334.databases.neo4j.io")
         self.auth = ("neo4j", os.getenv("NEO4J_PASSWORD", "oTzaPYT99TgH-GM2APk0gcFlf9k16wrTcVOhtfmAyyA"))
         
-        # 2. Cargar Datos del Grafo (Snapshot actual)
+        # 2. Regenerar datos con city_generator
+        print("   -> Regenerando datos sintéticos...")
+        try:
+            gen = CityGenerator(self.uri, self.auth)
+            gen.clear_database()  # Limpiar primero
+            personas, ubicaciones, warnings = gen.generate_data(num_personas=500, num_ubicaciones=15)
+            gen.save_to_neo4j(personas, ubicaciones, warnings)
+            gen.close()
+            print("   ✅ Datos regenerados exitosamente")
+        except Exception as e:
+            print(f"   ⚠️  Aviso al regenerar datos: {e}")
+            print("   Continuando con datos existentes en Neo4j...")
+        
+        # 3. Cargar Datos del Grafo (Snapshot actual)
         print("   -> Loading graph data from Neo4j...")
         self.etl = PoliceETL(self.uri, self.auth)
         self.etl.load_nodes()

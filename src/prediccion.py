@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from torch_geometric.nn import SAGEConv, HeteroConv
 from etl_policial import PoliceETL
+from city_generator import CityGenerator
 
 load_dotenv()
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -65,6 +66,18 @@ def ejecutar_prediccion():
     # 1. Cargar Datos de la Ciudad (Neo4j)
     URI = os.getenv("NEO4J_URI", "neo4j+ssc://5d9c9334.databases.neo4j.io")
     AUTH = ("neo4j", os.getenv("NEO4J_PASSWORD", "oTzaPYT99TgH-GM2APk0gcFlf9k16wrTcVOhtfmAyyA"))
+    
+    print("   -> Regenerando datos sintéticos...")
+    try:
+        gen = CityGenerator(URI, AUTH)
+        gen.clear_database()  # Limpiar primero
+        personas, ubicaciones, warnings = gen.generate_data(num_personas=500, num_ubicaciones=15)
+        gen.save_to_neo4j(personas, ubicaciones, warnings)
+        gen.close()
+        print("   ✅ Datos regenerados exitosamente")
+    except Exception as e:
+        print(f"   ⚠️  Aviso al regenerar datos: {e}")
+        print("   Continuando con datos existentes en Neo4j...")
     
     print("   -> Conectando con la base de datos...")
     etl = PoliceETL(URI, AUTH)

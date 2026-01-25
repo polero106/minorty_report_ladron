@@ -24,6 +24,17 @@ class CityGenerator:
         
         print(f"Matrix Real Cargada: {len(self.nodes)} intersecciones de Madrid listas.")
 
+    def clear_database(self):
+        """Limpia todos los nodos y relaciones de Neo4j"""
+        print("   -> Limpiando base de datos...")
+        with self.driver.session() as session:
+            try:
+                # Eliminar todas las relaciones y nodos
+                session.run("MATCH (n) DETACH DELETE n")
+                print("   ✅ Base de datos limpia")
+            except Exception as e:
+                print(f"   ⚠️  Error al limpiar: {e}")
+
     def close(self):
         self.driver.close()
 
@@ -96,8 +107,8 @@ class CityGenerator:
         print(f"   -> {len(criminales)} sujetos peligrosos potenciales.")
         
         for crim in criminales:
-            # Probabilidad de cometer crimen basada en su risk_seed
-            if random.random() < (crim['risk_seed'] * 0.5): 
+            # Probabilidad de cometer crimen basada en su risk_seed (muy baja)
+            if random.random() < (crim['risk_seed'] * 0.2): 
                 
                 # SELECCIONAR ESCENA DEL CRIMEN
                 # El crimen ocurre en una de las ubicaciones generadas (o muy cerca)
@@ -156,10 +167,10 @@ class CityGenerator:
             """, batch=personas)
             print(f"   -> {len(personas)} Personas creadas.")
 
-            # C. RELACIONES VIVIENDA (Aleatorio)
+            # C. RELACIONES VIVIENDA (probabilidad baja para no superar límites)
             session.run("""
             MATCH (p:Persona), (u:Ubicacion)
-            WHERE rand() < 0.03
+            WHERE rand() < 0.005
             MERGE (p)-[:VIVE_EN]->(u)
             """)
 
@@ -197,7 +208,7 @@ if __name__ == "__main__":
     gen = CityGenerator(URI, AUTH)
     
     # Generamos dataset
-    personas, ubicaciones, warnings = gen.generate_data(num_personas=2000, num_ubicaciones=150)
+    personas, ubicaciones, warnings = gen.generate_data(num_personas=500, num_ubicaciones=15)
     
     # Guardamos
     gen.save_to_neo4j(personas, ubicaciones, warnings)

@@ -10,6 +10,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from torch_geometric.nn import SAGEConv, HeteroConv
 from etl_policial import PoliceETL
+from city_generator import CityGenerator
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -94,11 +95,25 @@ class PoliceDiscriminator(nn.Module):
 # ----------------------------------------------------------------------
 def entrenar_policia():
     print("Iniciando entrenamiento ADVERSARIO (GAN) - Pre-Crimen...")
+    print("=" * 60)
     
-    # --- CARGAR DATOS ---
+    # --- REGENERAR DATOS CON CITY GENERATOR ---
+    print("\n🏗️  PASO 1: Regenerando datos sintéticos...")
     URI = os.getenv("NEO4J_URI", "neo4j+ssc://5d9c9334.databases.neo4j.io")
     AUTH = ("neo4j", os.getenv("NEO4J_PASSWORD", "oTzaPYT99TgH-GM2APk0gcFlf9k16wrTcVOhtfmAyyA"))
     
+    try:
+        gen = CityGenerator(URI, AUTH)
+        personas, ubicaciones, warnings = gen.generate_data(num_personas=500, num_ubicaciones=15)
+        gen.save_to_neo4j(personas, ubicaciones, warnings)
+        gen.close()
+        print("✅ Datos regenerados exitosamente en Neo4j")
+    except Exception as e:
+        print(f"⚠️  Aviso al regenerar datos: {e}")
+        print("   Continuando con datos existentes en Neo4j...")
+    
+    print("\n🧠 PASO 2: Cargando datos para entrenamiento...")
+    # --- CARGAR DATOS ---
     etl = PoliceETL(URI, AUTH)
     etl.load_nodes()
     etl.load_edges()
@@ -123,19 +138,20 @@ def entrenar_policia():
     print(f"   -> {len(real_pairs)} crímenes reales para entrenar.")
     
     if len(real_pairs) == 0:
-        print("ERROR: No hay datos suficientes.")
+        print("ERROR: No hay datos suficientes para entrenar.")
         return
+    
+    print(f"   -> Nodos: {len(data['Persona'].x)} Personas, {len(data['Ubicacion'].x)} Ubicaciones, {len(data['Warning'].x)} Crímenes")
 
     # --- INICIALIZAR MODELOS ---
+    print("\n🤖 PASO 3: Inicializando arquitectura del modelo...")
     encoder = GraphEncoder(data.metadata()).to(device)
     generator = CriminalGenerator().to(device)
     discriminator = PoliceDiscriminator().to(device)
     
     # Optimizadores separados
-    # El encoder entrena junto con ambos o podría solo actualizarse con el Discriminador. 
-    # Para simplificar y dar estabilidad, actualizaremos el encoder junto con el discriminador para aprender mejores representaciones del grafo real.
     opt_d = torch.optim.Adam(list(discriminator.parameters()) + list(encoder.parameters()), lr=0.0005)
-    opt_g = torch.optim.Adam(generator.parameters(), lr=0.001) # El criminal aprende más rápido
+    opt_g = torch.optim.Adam(generator.parameters(), lr=0.001)
     
     criterion = nn.BCELoss()
     
@@ -143,14 +159,20 @@ def entrenar_policia():
     os.makedirs(models_dir, exist_ok=True)
     save_path = os.path.join(models_dir, 'agente_precrime.pth')
 
-    print("   -> Comenzando la Batalla Adversaria (Policía vs Criminal)...")
+    print("   -> Encoder (GNN): 2 capas HeteroConv + SAGEConv(32)")
+    print("   -> Discriminador (Policía): Linear(64) -> LeakyReLU -> Linear(32) -> Sigmoid")
+    print("   -> Generador (Criminal): Linear(64) -> LeakyReLU -> Linear(embedding)")
+    
+    print("\n⚔️  PASO 4: Comenzando la Batalla Adversaria (Policía vs Criminal)...")
+    print("=" * 60)
     
     # Embedding Dimension Params
     EMBED_DIM = 32
     NOISE_DIM = 16
-    BATCH_SIZE = len(real_pairs) # Full batch por simplicidad
+    BATCH_SIZE = len(real_pairs) # Full batch
+    NUM_EPOCHS = 150  # Reducido de 300 ya que tenemos menos datos
     
-    for epoch in range(1, 301):
+    for epoch in range(1, NUM_EPOCHS + 1):
         # ---------------------
         # FASE 0: Obtener Embeddings Actuales del Grafo
         # ---------------------
@@ -218,22 +240,23 @@ def entrenar_policia():
         # ---------------------
         # LOGS
         # ---------------------
-        if epoch % 20 == 0:
-            print(f"Epoch {epoch:03d} | Loss D (Policía): {loss_d.item():.4f} | Loss G (Criminal): {loss_g.item():.4f}")
+        if epoch % 10 == 0:
+            print(f"Epoch {epoch:03d}/{NUM_EPOCHS} | 🚔 Policía Loss: {loss_d.item():.4f} | 🔴 Criminal Loss: {loss_g.item():.4f}")
 
     # --- GUARDAR SOLO EL POLICÍA (Discriminator + Encoder) ---
     # Para predicción necesitamos:
     # 1. Encoder (para saber quién es quién en el grafo)
     # 2. Discriminator (para calcular la probabilidad de crimen)
     
-    # Guardaremos un diccionario con ambos estados
     final_state = {
         'encoder': encoder.state_dict(),
         'discriminator': discriminator.state_dict()
     }
     torch.save(final_state, save_path)
-    print(f"\nEntrenamiento Finalizado.")
-    print(f"Agente Pre-Crimen (Policía) guardado en: {save_path}")
+    print("\n" + "=" * 60)
+    print(f"✅ Entrenamiento Finalizado!")
+    print(f"📊 Agente Pre-Crimen (Policía) guardado en: {save_path}")
+    print(f"🎯 Listo para hacer predicciones de crimen")
 
 if __name__ == "__main__":
     entrenar_policia()

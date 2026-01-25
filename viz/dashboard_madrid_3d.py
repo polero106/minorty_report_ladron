@@ -7,9 +7,6 @@ import sys
 import os
 import hvplot.pandas
 
-# Importar el servicio
-# Importar el servicio
-
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.prediction_service import PredictionService
