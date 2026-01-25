@@ -10,8 +10,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Importamos las capas de grafo necesarias
 from torch_geometric.nn import SAGEConv, HeteroConv
-# Usamos PoliceETL SOLO para cargar los datos de Neo4j
-from etl_policial import PoliceETL
+from src.etl_policial import PoliceETL
 
 load_dotenv()
 

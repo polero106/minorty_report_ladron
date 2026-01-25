@@ -8,9 +8,11 @@ import os
 import hvplot.pandas
 
 # Importar el servicio
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from src.prediction_service import PredictionService
+# Importar el servicio
 
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from src.prediction_service import PredictionService
 # ==============================================================================
 # 0. CONSTANTES (Deben coincidir con ETL)
 # ==============================================================================
@@ -95,14 +97,31 @@ if service:
         'id_visual': [f'{get_barrio_name(f"U_{i}")}' for i in range(len(x_locs))]
     })
     
+    # Obtener nodos Warning (Crímenes) - necesitamos mapearlos a ubicaciones
+    edge_index_ocurrio = service.data['Warning', 'OCURRIO_EN', 'Ubicacion'].edge_index.cpu().numpy()
+    
+    # Mapear cada Warning a su Ubicación para obtener coordenadas
+    warnings_locations = []
+    for i in range(edge_index_ocurrio.shape[1]):
+        w_idx = edge_index_ocurrio[0, i]
+        u_idx = edge_index_ocurrio[1, i]
+        warnings_locations.append({
+            'lat': denormalize_lat(x_locs[u_idx, 1]),
+            'lon': denormalize_lon(x_locs[u_idx, 2]),
+            'tipo': 'Crimen',
+            'id_visual': f'W_{w_idx}'
+        })
+    
+    df_warnings_base = pd.DataFrame(warnings_locations) if warnings_locations else pd.DataFrame()
+    
     layer_personas = pdk.Layer(
         "ScatterplotLayer",
         data=df_personas_base,
         get_position=["lon", "lat"],
         get_color=[0, 100, 255, 140], # Azul cian translúcido
-        get_radius=20,
+        get_radius=10,  # Reducido de 20 a 10
         pickable=True,
-        radius_min_pixels=2
+        radius_min_pixels=1
     )
     
     layer_ubicaciones = pdk.Layer(
@@ -110,12 +129,27 @@ if service:
         data=df_ubicaciones_base,
         get_position=["lon", "lat"],
         get_color=[255, 200, 0, 140], # Ámbar translúcido
-        get_radius=80,
+        get_radius=40,  # Reducido de 80 a 40
         pickable=True,
-        radius_min_pixels=3
+        radius_min_pixels=2
     )
     
+    layer_warnings = pdk.Layer(
+        "ScatterplotLayer",
+        data=df_warnings_base,
+        get_position=["lon", "lat"],
+        get_color=[255, 100, 100, 180], # Rojo translúcido
+        get_radius=15,  # Tamaño medio entre personas y ubicaciones
+        pickable=True,
+        radius_min_pixels=1,
+        stroked=True,
+        get_line_color=[255, 0, 0, 255],
+        line_width_min_pixels=1
+    ) if not df_warnings_base.empty else None
+    
     initial_layers = [layer_personas, layer_ubicaciones]
+    if layer_warnings:
+        initial_layers.append(layer_warnings)
 else:
     initial_layers = []
 
@@ -245,10 +279,10 @@ def run_prediction(event):
                 get_position=["lon_ubicacion", "lat_ubicacion"],
                 get_fill_color=[255, 0, 0, 200],
                 get_line_color=[255, 255, 255],
-                get_radius=50,
+                get_radius=25,  # Reducido de 50 a 25
                 stroked=True,
                 filled=True,
-                radius_min_pixels=4,
+                radius_min_pixels=3,
                 pickable=True
             )
 
