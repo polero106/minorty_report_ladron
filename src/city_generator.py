@@ -15,80 +15,114 @@ class CityGenerator:
         self.driver = GraphDatabase.driver(uri, auth=auth)
         self.fake = Faker('es_ES') # Datos en español
         print("Descargando grafo de calles de Madrid (Distrito Centro)...")
-        # Usamos 'network_type=drive' o 'walk' para obtener nodos de calles
+        
+        # 1. COORDENADAS REALES (OSMnx)
+        # Usamos 'network_type=drive' (coches) o 'walk' (peatones). Usaremos 'all' para calles y plazas.
+        # Esto descarga nodos reales con atributos 'y' (Latitud) y 'x' (Longitud)
         self.G = ox.graph_from_place('Centro, Madrid, Spain', network_type='all')
-        self.nodes = list(self.G.nodes(data=True)) # Lista de (id, data)
-        print(f"Conectado a la Matrix. Grafo cargado con {len(self.nodes)} nodos.")
+        self.nodes = list(self.G.nodes(data=True)) # Lista de tuplas: (node_id, atributos)
+        
+        print(f"Matrix Real Cargada: {len(self.nodes)} intersecciones de Madrid listas.")
 
     def close(self):
         self.driver.close()
 
-    def get_random_point_on_street(self):
-        """Selecciona un nodo aleatorio del grafo de calles de Madrid."""
+    def get_real_madrid_point(self):
+        """
+        Selecciona un nodo REAL del callejero de Madrid.
+        Returns: {x: lon, y: lat, z: alt}
+        """
         node_id, data = random.choice(self.nodes)
+        
+        # Extraer Lat/Lon REALES del nodo de OpenStreetMap
+        # NO NORMALIZAR: Se devuelven tal cual (ej: 40.41, -3.70)
         return {
-            'x': data['x'], # Longitude
-            'y': data['y'], # Latitude
-            'z': float(np.random.uniform(0, 50)) # Altura simulada para 3D
+            'x': data['x'], # Longitud real
+            'y': data['y'], # Latitud real
+            'z': float(np.random.uniform(600, 650)) # Altura media de Madrid (~600-650m)
         }
 
     def generate_data(self, num_personas=1000, num_ubicaciones=50):
-        print(f"Fabricando ciudad con {num_personas} ciudadanos y {num_ubicaciones} zonas...")
+        print(f"Fabricando ciudad sintética con {num_personas} ciudadanos y {num_ubicaciones} zonas...")
         
-        # 1. GENERAR UBICACIONES (BOLAS AMARILLAS)
+        # ---------------------------------------------------------
+        # 1. GENERAR UBICACIONES (Zonas de Interés)
+        # ---------------------------------------------------------
         ubicaciones = []
         for i in range(num_ubicaciones):
-            coords = self.get_random_point_on_street()
+            coords = self.get_real_madrid_point() # Punto real
+            
             ubicaciones.append({
                 'id': f"LOC_{i:03d}",
-                'nombre': self.fake.street_name(),
+                'nombre': f"{self.fake.street_name()} {random.randint(1, 100)}", # Calle Real Inventada
                 'tipo': 'Zona Comercial' if random.random() > 0.5 else 'Residencial',
-                'peligrosidad': float(np.random.beta(3, 3)), # Distribución más equilibrada (Campana centrada en 0.5)
-                'x': coords['x'],
-                'y': coords['y'],
+                'peligrosidad': float(np.random.beta(2, 5)), # Beta skewed to 0. (Mayoría seguras)
+                'x': coords['x'], # Lon
+                'y': coords['y'], # Lat
                 'z': coords['z'],
-                'color': '#FFD700' # Amarillo para la UI 3D
+                'color': '#FFD700' # Amarillo
             })
 
-        # 2. GENERAR PERSONAS (CIUDADANOS)
+        # ---------------------------------------------------------
+        # 2. GENERAR PERSONAS (Ciudadanos)
+        # ---------------------------------------------------------
         personas = []
         for i in range(num_personas):
-            # La "Risk Seed" es crucial: define la propensión latente al crimen.
-            # Usamos una distribución normal más amplia y con media ligeramente superior
-            risk_seed = np.random.normal(0.4, 0.25) 
-            risk_seed = np.clip(risk_seed, 0.0, 1.0) # Forzar entre 0 y 1
+            # La "Risk Seed" define la propensión al crimen
+            risk_seed = np.random.normal(0.3, 0.2) 
+            risk_seed = np.clip(risk_seed, 0.0, 1.0) 
 
-            coords = self.get_random_point_on_street()
+            coords = self.get_real_madrid_point() # Viven en puntos reales
             
             personas.append({
                 'id': f"P_{i:05d}",
                 'nombre': self.fake.name(),
                 'edad': random.randint(18, 80),
                 'profesion': self.fake.job(),
-                'risk_seed': float(risk_seed), # IMPORTANTE para el modelo
+                'risk_seed': float(risk_seed),
                 'x': coords['x'], 
                 'y': coords['y'], 
                 'z': coords['z']
             })
 
-        # 3. GENERAR WARNINGS/CRÍMENES PASADOS (BOLAS ROJAS)
-        # Solo el 30% de la población tiene antecedentes (antes 10%)
+        # ---------------------------------------------------------
+        # 3. GENERAR WARNINGS (Crímenes) - CON COHERENCIA ESPACIAL
+        # ---------------------------------------------------------
+        # Lógica: Los crímenes ocurren EN o MUY CERCA de una Ubicación existente.
         warnings = []
-        criminales = [p for p in personas if p['risk_seed'] > 0.45] # Bajamos el umbral para tener más criminales
+        
+        # Filtramos criminales potenciales (Risk Seed alta)
+        criminales = [p for p in personas if p['risk_seed'] > 0.6] 
+        print(f"   -> {len(criminales)} sujetos peligrosos potenciales.")
         
         for crim in criminales:
-            if random.random() > 0.2: # 80% de probabilidad de tener antecedentes si eres criminal
-                coords = self.get_random_point_on_street() # Crimen en lugar real
+            # Probabilidad de cometer crimen basada en su risk_seed
+            if random.random() < (crim['risk_seed'] * 0.5): 
+                
+                # SELECCIONAR ESCENA DEL CRIMEN
+                # El crimen ocurre en una de las ubicaciones generadas (o muy cerca)
+                scene = random.choice(ubicaciones)
+                
+                # Añadir Jitter (Variación aleatoria de ~10 metros)
+                # 0.0001 grados ~ 11 metros
+                jitter_lat = random.uniform(-0.0001, 0.0001)
+                jitter_lon = random.uniform(-0.0001, 0.0001)
+                
                 warnings.append({
-                    'id': f"WARN_{random.randint(0, 99999)}",
-                    'delito': random.choice(['Robo', 'Agresión', 'Fraude', 'Homicidio']),
-                    'gravedad': float(crim['risk_seed'] + np.random.uniform(0, 0.2)),
-                    'fecha': self.fake.date_between(start_date='-2y', end_date='today').isoformat(),
+                    'id': f"WARN_{random.randint(10000, 99999)}",
+                    'delito': random.choice(['Robo', 'Agresión', 'Vandalismo', 'Hurto']),
+                    'gravedad': float(crim['risk_seed'] + np.random.uniform(0, 0.1)), # Gravedad ligada al riesgo
+                    'fecha': self.fake.date_between(start_date='-1y', end_date='today').isoformat(),
                     'autor_id': crim['id'],
-                    'x': coords['x'], # El crimen ocurre en un punto espacial
-                    'y': coords['y'],
-                    'z': coords['z'],
-                    'color': '#FF0000' # Rojo para la UI 3D
+                    'scene_id': scene['id'], # Guardamos referencia para el grafo
+                    
+                    # 2. COORDENADAS CRÍMENES (Warnings)
+                    # Heredan la pos de la ubicación + jitter
+                    'x': scene['x'] + jitter_lon, 
+                    'y': scene['y'] + jitter_lat,
+                    'z': scene['z'],
+                    'color': '#FF0000', # Rojo
+                    'type': 'Crimen'
                 })
 
         return personas, ubicaciones, warnings
@@ -98,19 +132,19 @@ class CityGenerator:
         start_time = time.time()
 
         with self.driver.session() as session:
-            # A. CREAR UBICACIONES (Nodos Amarillos)
+            # A. CREAR UBICACIONES
             session.run("""
             UNWIND $batch AS row
             MERGE (u:Ubicacion {id: row.id})
             SET u.nombre = row.nombre, 
                 u.peligrosidad = row.peligrosidad,
                 u.x = row.x, u.y = row.y, u.z = row.z,
-                u.lat = row.y, u.lon = row.x,
+                u.lat = row.y, u.lon = row.x,  // Propiedades Lat/Lon explícitas
                 u.color = row.color
             """, batch=ubicaciones)
             print(f"   -> {len(ubicaciones)} Ubicaciones creadas.")
 
-            # B. CREAR PERSONAS (Nodos Neutros)
+            # B. CREAR PERSONAS
             session.run("""
             UNWIND $batch AS row
             MERGE (p:Persona {id: row.id})
@@ -122,49 +156,50 @@ class CityGenerator:
             """, batch=personas)
             print(f"   -> {len(personas)} Personas creadas.")
 
-            # C. CREAR RELACIONES DE VIVIENDA (Aleatorio)
-            # Conectamos personas a ubicaciones cercanas (simulado)
+            # C. RELACIONES VIVIENDA (Aleatorio)
             session.run("""
             MATCH (p:Persona), (u:Ubicacion)
-            WHERE rand() < 0.05  // Conexión aleatoria del 5%
+            WHERE rand() < 0.03
             MERGE (p)-[:VIVE_EN]->(u)
             """)
-            print("   -> Relaciones VIVE_EN generadas.")
 
-            # D. CREAR WARNINGS (Nodos Rojos) y Conexiones
+            # D. CREAR WARNINGS (Nodos Rojos)
+            # Ahora tienen coordenadas reales asociadas a la escena
             session.run("""
             UNWIND $batch AS row
-            MATCH (p:Persona {id: row.autor_id})
+            MATCH (p:Persona {id: row.autor_id}) // El autor debe existir
             MERGE (w:Warning {id: row.id})
             SET w.delito = row.delito,
                 w.gravedad = row.gravedad,
                 w.fecha = row.fecha,
-                w.x = row.x, w.y = row.y, w.z = row.z,
-                w.lat = row.y, w.lon = row.x,
-                w.color = row.color
+                w.x = row.x, w.y = row.y, 
+                w.lat = row.y, w.lon = row.x, // Coordenadas geograficas
+                w.color = row.color,
+                w.type = row.type
             MERGE (p)-[:COMETIO]->(w)
             """, batch=warnings)
-            print(f"   -> {len(warnings)} Warnings (Crímenes) creados.")
             
-            # E. RELACIONAR WARNINGS CON UBICACIONES
-            # (El crimen ocurrió cerca de una ubicación)
+            # E. RELACIONAR CRÍMENES CON SU ESCENA (Exacta)
+            # Usamos el scene_id que guardamos anteriormente para evitar busquedas espaciales costosas
             session.run("""
-            MATCH (w:Warning), (u:Ubicacion)
-            WHERE abs(w.x - u.x) < 0.005 AND abs(w.y - u.y) < 0.005 // Distancia Lat/Lon pequeña
+            UNWIND $batch AS row
+            MATCH (w:Warning {id: row.id})
+            MATCH (u:Ubicacion {id: row.scene_id})
             MERGE (w)-[:OCURRIO_EN]->(u)
-            """)
+            """, batch=warnings)
+            
+            print(f"   -> {len(warnings)} Warnings (Crímenes) creados y vinculados.")
 
         end_time = time.time()
-        print(f"Todo listo en {end_time - start_time:.2f} segundos.")
+        print(f"Ciudad Generada en {end_time - start_time:.2f} segundos.")
 
 if __name__ == "__main__":
-    # 1. Instanciar Generador
     gen = CityGenerator(URI, AUTH)
     
-    # 2. Generar Datos en Memoria (Listas de Diccionarios)
-    personas, ubicaciones, warnings = gen.generate_data(num_personas=3000, num_ubicaciones=300)
+    # Generamos dataset
+    personas, ubicaciones, warnings = gen.generate_data(num_personas=2000, num_ubicaciones=150)
     
-    # 3. Volcar a la API de Neo4j
+    # Guardamos
     gen.save_to_neo4j(personas, ubicaciones, warnings)
     
     gen.close()
