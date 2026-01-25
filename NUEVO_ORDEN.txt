@@ -1,0 +1,177 @@
+┌─────────────────────────────────────────────────────────────────────┐
+│                                                                     │
+│     🚀 NUEVO ORDEN DE EJECUCIÓN - MINORITY REPORT MADRID           │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+
+════════════════════════════════════════════════════════════════════════
+  PASO 1: GENERAR CIUDAD SINTÉTICA
+════════════════════════════════════════════════════════════════════════
+
+  📍 Comando:
+     python src/city_generator.py
+
+  ⏱️  Duración: ~30-60 segundos
+  
+  📦 Qué hace:
+     • Descarga calles reales de Madrid (OpenStreetMap/OSMnx)
+     • Genera 2000 personas con ubicaciones reales
+     • Genera 150 ubicaciones de interés
+     • Genera warnings (crímenes) con ubicaciones coherentes
+     • Guarda todo en Neo4j con coordenadas REALES
+  
+  ✅ Resultado:
+     Base de datos Neo4j poblada con:
+     - Nodos: Persona, Ubicacion, Warning
+     - Propiedades: lat, lon (coordenadas reales ~40.4, -3.7)
+     - Relaciones: VIVE_EN, COMETIO, OCURRIO_EN
+
+
+════════════════════════════════════════════════════════════════════════
+  PASO 2: ENTRENAR MODELO GAN
+════════════════════════════════════════════════════════════════════════
+
+  🧠 Comando:
+     python src/entrenamiento_gan.py
+
+  ⏱️  Duración: ~5-10 minutos (300 epochs)
+  
+  📦 Qué hace:
+     • Lee datos de Neo4j usando MadridDataLoader
+     • NO normaliza coordenadas (usa reales)
+     • Entrena red adversaria:
+       - Generador (Criminal): Predice ubicaciones de crímenes
+       - Discriminador (Policía): Detecta patrones criminales
+     • Guarda modelo en models/agente_precrime.pth
+  
+  ⚠️  IMPORTANTE:
+     Si tienes un agente_precrime.pth viejo, bórralo antes:
+     rm models/agente_precrime.pth
+     
+     El modelo viejo fue entrenado con coordenadas normalizadas [0,1]
+     El modelo nuevo usa coordenadas reales [40.x, -3.x]
+  
+  ✅ Resultado:
+     Archivo models/agente_precrime.pth con modelo entrenado
+
+
+════════════════════════════════════════════════════════════════════════
+  PASO 3 (OPCIONAL): PREDICCIÓN EN CLI
+════════════════════════════════════════════════════════════════════════
+
+  🔍 Comando:
+     python src/prediccion.py
+
+  ⏱️  Duración: ~10-30 segundos
+  
+  📦 Qué hace:
+     • Carga el modelo entrenado
+     • Lee datos actuales de Neo4j
+     • Calcula probabilidades de crimen
+     • Muestra TOP 10 amenazas en terminal
+  
+  ✅ Resultado:
+     Tabla en consola con predicciones:
+     PROB %   | ID SUJETO | RIESGO | ID ZONA | PELIGROSIDAD
+     95.23%   | P_0142    | 0.87   | U_0035  | 0.76
+
+
+════════════════════════════════════════════════════════════════════════
+  PASO 4: VISUALIZAR DASHBOARD 3D
+════════════════════════════════════════════════════════════════════════
+
+  🎨 Comando:
+     panel serve viz/dashboard_madrid_3d.py --show --port 5006
+
+  ⏱️  Duración: Servidor continuo
+  
+  🌐 URL:
+     http://localhost:5006
+  
+  📦 Qué hace:
+     • Inicia servidor web con Panel
+     • Carga modelo y datos con PredictionService
+     • Muestra mapa 3D interactivo de Madrid
+     • Visualiza:
+       🔵 Personas (puntos azules)
+       🟡 Ubicaciones (puntos amarillos)
+       Al hacer click en "EJECUTAR ANÁLISIS IA":
+       🔴 Arcos rojos (conexiones criminales predichas)
+       🔴 Puntos rojos (ubicaciones de crimen futuro)
+  
+  ✅ Resultado:
+     Dashboard web interactivo con predicciones en tiempo real
+
+
+════════════════════════════════════════════════════════════════════════
+  ⚠️  CAMBIOS IMPORTANTES DEL SISTEMA ANTIGUO
+════════════════════════════════════════════════════════════════════════
+
+  ❌ NO USAR MÁS:
+     • src/etl_policial.py (normalizaba coordenadas)
+     • Funciones denormalize_lat/denormalize_lon en dashboard
+     • Modelos entrenados con sistema antiguo
+
+  ✅ USAR AHORA:
+     • src/data_loader.py (coordenadas reales)
+     • Dashboard trabaja directo con coordenadas reales
+     • Re-entrenar modelo con nuevo sistema
+
+
+════════════════════════════════════════════════════════════════════════
+  🐛 SOLUCIÓN DE PROBLEMAS
+════════════════════════════════════════════════════════════════════════
+
+  Problema: Dashboard muestra puntos fuera de Madrid
+  ───────────────────────────────────────────────────
+  Causa:    Modelo entrenado con sistema antiguo
+  Solución: rm models/agente_precrime.pth
+            python src/city_generator.py
+            python src/entrenamiento_gan.py
+
+  Problema: Error "No module named 'etl_policial'"
+  ───────────────────────────────────────────────────
+  Causa:    Archivo no actualizado
+  Solución: Cambiar import:
+            from src.data_loader import MadridDataLoader
+
+  Problema: Error "Model not found"
+  ───────────────────────────────────────────────────
+  Causa:    No se ha entrenado el modelo
+  Solución: python src/entrenamiento_gan.py
+
+  Problema: Error de conexión a Neo4j
+  ───────────────────────────────────────────────────
+  Causa:    Credenciales incorrectas o DB apagada
+  Solución: Verificar archivo .env:
+            NEO4J_URI=neo4j+ssc://xxxxx.databases.neo4j.io
+            NEO4J_PASSWORD=tu_password
+
+
+════════════════════════════════════════════════════════════════════════
+  📚 DOCUMENTACIÓN ADICIONAL
+════════════════════════════════════════════════════════════════════════
+
+  Para más detalles:
+  • ORDEN_EJECUCION.md - Documentación técnica completa
+  • GUIA_RAPIDA.md - Guía rápida visual
+  • README.md - Descripción general del proyecto
+
+
+════════════════════════════════════════════════════════════════════════
+  🎯 RESUMEN VISUAL
+════════════════════════════════════════════════════════════════════════
+
+  city_generator.py  →  Neo4j (coords reales)
+                              ↓
+                    entrenamiento_gan.py
+                              ↓
+                    models/agente_precrime.pth
+                              ↓
+                    ┌─────────┴─────────┐
+                    ↓                   ↓
+              prediccion.py      dashboard_madrid_3d.py
+              (CLI output)         (Web UI visual)
+
+
+════════════════════════════════════════════════════════════════════════
