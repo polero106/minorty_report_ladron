@@ -43,7 +43,7 @@ class CityGenerator:
                 'id': f"LOC_{i:03d}",
                 'nombre': self.fake.street_name(),
                 'tipo': 'Zona Comercial' if random.random() > 0.5 else 'Residencial',
-                'peligrosidad': float(np.random.beta(2, 5)), # Distribución sesgada hacia seguridad
+                'peligrosidad': float(np.random.beta(3, 3)), # Distribución más equilibrada (Campana centrada en 0.5)
                 'x': coords['x'],
                 'y': coords['y'],
                 'z': coords['z'],
@@ -54,8 +54,8 @@ class CityGenerator:
         personas = []
         for i in range(num_personas):
             # La "Risk Seed" es crucial: define la propensión latente al crimen.
-            # Usamos una distribución normal para que haya pocos "muy buenos" y pocos "muy malos".
-            risk_seed = np.random.normal(0.3, 0.15) 
+            # Usamos una distribución normal más amplia y con media ligeramente superior
+            risk_seed = np.random.normal(0.4, 0.25) 
             risk_seed = np.clip(risk_seed, 0.0, 1.0) # Forzar entre 0 y 1
 
             coords = self.get_random_point_on_street()
@@ -72,12 +72,12 @@ class CityGenerator:
             })
 
         # 3. GENERAR WARNINGS/CRÍMENES PASADOS (BOLAS ROJAS)
-        # Solo el 10% de la población tiene antecedentes
+        # Solo el 30% de la población tiene antecedentes (antes 10%)
         warnings = []
-        criminales = [p for p in personas if p['risk_seed'] > 0.7]
+        criminales = [p for p in personas if p['risk_seed'] > 0.45] # Bajamos el umbral para tener más criminales
         
         for crim in criminales:
-            if random.random() > 0.3: # No todos son atrapados
+            if random.random() > 0.2: # 80% de probabilidad de tener antecedentes si eres criminal
                 coords = self.get_random_point_on_street() # Crimen en lugar real
                 warnings.append({
                     'id': f"WARN_{random.randint(0, 99999)}",
@@ -162,7 +162,7 @@ if __name__ == "__main__":
     gen = CityGenerator(URI, AUTH)
     
     # 2. Generar Datos en Memoria (Listas de Diccionarios)
-    personas, ubicaciones, warnings = gen.generate_data(num_personas=2000, num_ubicaciones=100)
+    personas, ubicaciones, warnings = gen.generate_data(num_personas=3000, num_ubicaciones=300)
     
     # 3. Volcar a la API de Neo4j
     gen.save_to_neo4j(personas, ubicaciones, warnings)

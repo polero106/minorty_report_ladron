@@ -26,17 +26,17 @@ class PoliceETL:
         
         # 1. PERSONAS (Features: Risk Seed + Coordenadas Normalizadas)
         # Vector: [risk, lat_norm, lon_norm] -> Dim 3
-        query_p = "MATCH (n:Persona) RETURN id(n) as id, n.risk_seed as risk, n.lat as lat, n.lon as lon"
+        query_p = "MATCH (n:Persona) RETURN elementId(n) as id, n.risk_seed as risk, n.lat as lat, n.lon as lon"
         self._process_node_type(query_p, 'Persona', ['risk', 'lat', 'lon'])
 
         # 2. UBICACIONES (Features: Peligrosidad + Coordenadas Normalizadas)
         # Vector: [danger, lat_norm, lon_norm] -> Dim 3
-        query_u = "MATCH (n:Ubicacion) RETURN id(n) as id, n.peligrosidad as danger, n.lat as lat, n.lon as lon"
+        query_u = "MATCH (n:Ubicacion) RETURN elementId(n) as id, n.peligrosidad as danger, n.lat as lat, n.lon as lon"
         self._process_node_type(query_u, 'Ubicacion', ['danger', 'lat', 'lon'])
 
         # 3. WARNINGS (Features: Gravedad + Coordenadas Normalizadas)
         # Vector: [gravity, lat_norm, lon_norm] -> Dim 3
-        query_w = "MATCH (n:Warning) RETURN id(n) as id, n.gravedad as gravity, n.lat as lat, n.lon as lon"
+        query_w = "MATCH (n:Warning) RETURN elementId(n) as id, n.gravedad as gravity, n.lat as lat, n.lon as lon"
         self._process_node_type(query_w, 'Warning', ['gravity', 'lat', 'lon'])
 
     def _process_node_type(self, query, label, feature_cols):
@@ -79,7 +79,9 @@ class PoliceETL:
             self.data[label].num_nodes = len(features)
             
             # Guardamos ids originales para referencia futura (en predicción)
-            self.data[label].original_ids = torch.tensor(list(self.node_map[label].keys()), dtype=torch.long)
+            # Nota: elementId devuelve un string, no un long, así que no podemos usar dtype=torch.long si queremos el ID original.
+            # Para simplificar y evitar errores de tensores, guardaremos una lista de strings en el objeto data.
+            self.data[label].original_ids = list(self.node_map[label].keys())
             
             print(f"      - {label}: {len(features)} nodos cargados. Dimensión: {len(features[0])}")
 
@@ -97,7 +99,7 @@ class PoliceETL:
             for src_label, rel_type, dst_label, rev_rel_type in edge_types:
                 query = f"""
                 MATCH (s:{src_label})-[r:{rel_type}]->(t:{dst_label})
-                RETURN id(s) as src, id(t) as dst
+                RETURN elementId(s) as src, elementId(t) as dst
                 """
                 src_indices = []
                 dst_indices = []

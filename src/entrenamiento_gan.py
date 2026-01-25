@@ -1,5 +1,6 @@
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import sys
 import os
@@ -16,17 +17,20 @@ load_dotenv()
 # Detectar GPU o CPU
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-class PreCrimeModel(torch.nn.Module):
+# ----------------------------------------------------------------------
+# 1. Feature Extractor (GNN) - Para obtener embeddings iniciales del Grafo
+# ----------------------------------------------------------------------
+class GraphEncoder(torch.nn.Module):
     def __init__(self, metadata):
         super().__init__()
-        # Input=3. Usamos HeteroConv para manejar relaciones explícitamente
+        # Usamos HeteroConv para manejar relaciones explícitamente y generar embeddings ricos
         self.conv1 = HeteroConv({
-            edge_type: SAGEConv((-1, -1), 16) 
+            edge_type: SAGEConv((-1, -1), 32) 
             for edge_type in metadata[1]
         }, aggr='sum')
         
         self.conv2 = HeteroConv({
-            edge_type: SAGEConv((-1, -1), 16) 
+            edge_type: SAGEConv((-1, -1), 32) 
             for edge_type in metadata[1]
         }, aggr='sum')
         
@@ -41,20 +45,57 @@ class PreCrimeModel(torch.nn.Module):
         
         return x_dict
 
-    def predict_link(self, z_dict, edge_label_index):
-        # Extraemos vectores de las Personas y Ubicaciones que queremos comparar
-        row, col = edge_label_index
-        z_person = z_dict['Persona'][row]
-        z_location = z_dict['Ubicacion'][col]
+# ----------------------------------------------------------------------
+# 2. GENERADOR (El Criminal)
+# ----------------------------------------------------------------------
+class CriminalGenerator(nn.Module):
+    def __init__(self, embedding_dim=32, noise_dim=16):
+        super().__init__()
+        # Input: Embedding de Persona (32) + Ruido (16)
+        self.net = nn.Sequential(
+            nn.Linear(embedding_dim + noise_dim, 64),
+            nn.LeakyReLU(0.2),
+            nn.BatchNorm1d(64),
+            nn.Linear(64, 64),
+            nn.LeakyReLU(0.2),
+            nn.BatchNorm1d(64),
+            nn.Linear(64, embedding_dim) # Output: Fake Location Embedding
+        )
         
-        # Calculamos afinidad (Producto Punto)
-        score = (z_person * z_location).sum(dim=-1)
-        return torch.sigmoid(score)
+    def forward(self, person_emb, z_noise):
+        # Concatenar Persona + Ruido
+        x = torch.cat([person_emb, z_noise], dim=1)
+        return self.net(x)
 
+# ----------------------------------------------------------------------
+# 3. DISCRIMINADOR (El Policía)
+# ----------------------------------------------------------------------
+class PoliceDiscriminator(nn.Module):
+    def __init__(self, embedding_dim=32):
+        super().__init__()
+        # Input: Embedding de Persona (32) + Embedding de Ubicación (32)
+        # Queremos saber si este par (Persona, Ubicación) es una conexión REAL o FAKE
+        self.net = nn.Sequential(
+            nn.Linear(embedding_dim * 2, 64),
+            nn.LeakyReLU(0.2),
+            nn.Dropout(0.3),
+            nn.Linear(64, 32),
+            nn.LeakyReLU(0.2),
+            nn.Linear(32, 1),
+            nn.Sigmoid() # Probabilidad de ser Real
+        )
+        
+    def forward(self, person_emb, location_emb):
+        x = torch.cat([person_emb, location_emb], dim=1)
+        return self.net(x)
+
+# ----------------------------------------------------------------------
+# 4. BUCLE DE ENTRENAMIENTO ADVERSARIO
+# ----------------------------------------------------------------------
 def entrenar_policia():
-    print("Iniciando entrenamiento del Sistema Pre-Crimen Geoespacial...")
+    print("Iniciando entrenamiento ADVERSARIO (GAN) - Pre-Crimen...")
     
-    # 1. CARGAR DATOS (ETL)
+    # --- CARGAR DATOS ---
     URI = os.getenv("NEO4J_URI", "neo4j+ssc://5d9c9334.databases.neo4j.io")
     AUTH = ("neo4j", os.getenv("NEO4J_PASSWORD", "oTzaPYT99TgH-GM2APk0gcFlf9k16wrTcVOhtfmAyyA"))
     
@@ -63,71 +104,136 @@ def entrenar_policia():
     etl.load_edges()
     data = etl.get_data().to(device)
 
-    # 2. DEFINIR OBJETIVO DE ENTRENAMIENTO
-    print("   -> Construyendo ground truth (Persona -> Warning -> Ubicacion)...")
-    
-    # Buscamos caminos: (P)-[COMETIO]->(W)-[OCURRIO_EN]->(U)
+    # --- PREPARAR GROUND TRUTH (CRÍMENES REALES) ---
+    print("   -> Construyendo dataset de crímenes reales...")
     edge_index_cometio = data['Persona', 'COMETIO', 'Warning'].edge_index
     edge_index_ocurrio = data['Warning', 'OCURRIO_EN', 'Ubicacion'].edge_index
     
-    # Mapear Warning -> Ubicacion
+    # Mapeo rápido Warning -> Ubicacion
     w_to_u = {w.item(): u.item() for w, u in zip(edge_index_ocurrio[0], edge_index_ocurrio[1])}
     
-    sources = []
-    targets = []
+    real_pairs = []
     for i in range(edge_index_cometio.size(1)):
         p_idx = edge_index_cometio[0, i].item()
         w_idx = edge_index_cometio[1, i].item()
         if w_idx in w_to_u:
-            sources.append(p_idx)
-            targets.append(w_to_u[w_idx])
+            real_pairs.append([p_idx, w_to_u[w_idx]])
             
-    # Casos Reales (Positivos)
-    pos_edge_index = torch.tensor([sources, targets], dtype=torch.long, device=device)
-    print(f"   -> Casos positivos identificados para entrenamiento: {pos_edge_index.size(1)}")
-
-    if pos_edge_index.size(1) == 0:
-        print("ERROR CRÍTICO: No se encontraron relaciones indirectas para entrenar.")
+    real_pairs = torch.tensor(real_pairs, dtype=torch.long, device=device)
+    print(f"   -> {len(real_pairs)} crímenes reales para entrenar.")
+    
+    if len(real_pairs) == 0:
+        print("ERROR: No hay datos suficientes.")
         return
 
-    # 3. INICIALIZAR CONTENEDOR DE MODELOS
+    # --- INICIALIZAR MODELOS ---
+    encoder = GraphEncoder(data.metadata()).to(device)
+    generator = CriminalGenerator().to(device)
+    discriminator = PoliceDiscriminator().to(device)
+    
+    # Optimizadores separados
+    # El encoder entrena junto con ambos o podría solo actualizarse con el Discriminador. 
+    # Para simplificar y dar estabilidad, actualizaremos el encoder junto con el discriminador para aprender mejores representaciones del grafo real.
+    opt_d = torch.optim.Adam(list(discriminator.parameters()) + list(encoder.parameters()), lr=0.0005)
+    opt_g = torch.optim.Adam(generator.parameters(), lr=0.001) # El criminal aprende más rápido
+    
+    criterion = nn.BCELoss()
+    
     models_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'models')
     os.makedirs(models_dir, exist_ok=True)
-    model_path = os.path.join(models_dir, 'agente_precrime.pth')
+    save_path = os.path.join(models_dir, 'agente_precrime.pth')
 
-    model = PreCrimeModel(data.metadata()).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
-
-    # 4. BUCLE DE ENTRENAMIENTO
-    model.train()
-    print("   -> Entrenando Red Neuronal de Grafos (SAGEConv)...")
-    for epoch in range(1, 101):
-        optimizer.zero_grad()
+    print("   -> Comenzando la Batalla Adversaria (Policía vs Criminal)...")
+    
+    # Embedding Dimension Params
+    EMBED_DIM = 32
+    NOISE_DIM = 16
+    BATCH_SIZE = len(real_pairs) # Full batch por simplicidad
+    
+    for epoch in range(1, 301):
+        # ---------------------
+        # FASE 0: Obtener Embeddings Actuales del Grafo
+        # ---------------------
+        # Pass forward para obtener representaciones latentes de Personas y Ubicaciones
+        z_dict = encoder(data.x_dict, data.edge_index_dict)
+        z_personas = z_dict['Persona']   # [Num_Personas, 32]
+        z_ubicaciones = z_dict['Ubicacion'] # [Num_Ubicaciones, 32]
         
-        # A. Generar Embeddings
-        z_dict = model(data.x_dict, data.edge_index_dict)
+        # Seleccionar embeddings de los pares reales
+        real_p_emb = z_personas[real_pairs[:, 0]]
+        real_u_emb = z_ubicaciones[real_pairs[:, 1]]
         
-        # B. Predicción Positivos
-        pos_pred = model.predict_link(z_dict, pos_edge_index)
-        loss_pos = F.binary_cross_entropy(pos_pred, torch.ones_like(pos_pred))
+        # ---------------------
+        # FASE A: Entrenar DISCRIMINADOR (Policía)
+        # ---------------------
+        # Maximizar log(D(x)) + log(1 - D(G(z)))
+        opt_d.zero_grad()
         
-        # C. Predicción Negativos (Aleatorios)
-        neg_edge_index = torch.randint(0, data['Ubicacion'].num_nodes, (2, pos_edge_index.size(1)), device=device)
-        neg_edge_index[0] = torch.randint(0, data['Persona'].num_nodes, (pos_edge_index.size(1),), device=device)
+        # 1. Real Data (Label ~0.9 para Smoothing)
+        pred_real = discriminator(real_p_emb, real_u_emb)
+        label_real = torch.full_like(pred_real, 0.9) 
+        loss_real = criterion(pred_real, label_real)
         
-        neg_pred = model.predict_link(z_dict, neg_edge_index)
-        loss_neg = F.binary_cross_entropy(neg_pred, torch.zeros_like(neg_pred))
+        # 2. Fake Data (Criminal genera Ubicación falsa para una Persona real)
+        # Tomamos las mismas personas reales para ver dónde cometerían otro crimen (falso)
+        noise = torch.randn(BATCH_SIZE, NOISE_DIM, device=device)
+        fake_u_emb = generator(real_p_emb.detach(), noise) # Detach para no actualizar G aquí
         
-        loss = loss_pos + loss_neg
-        loss.backward()
-        optimizer.step()
+        pred_fake = discriminator(real_p_emb.detach(), fake_u_emb)
+        label_fake = torch.zeros_like(pred_fake)
+        loss_fake = criterion(pred_fake, label_fake)
         
+        loss_d = (loss_real + loss_fake) / 2
+        loss_d.backward()
+        opt_d.step()
+        
+        # ---------------------
+        # FASE B: Entrenar GENERADOR (Criminal)
+        # ---------------------
+        # Maximizar log(D(G(z))) -> Minimizar log(1 - D(G(z)))
+        # Queremos que el discriminador diga "1" (Real) para nuestros Fakes
+        opt_g.zero_grad()
+        
+        # Recalculamos fakes (ahora queremos gradiente en G)
+        # Nota: Usamos las mismas personas. 
+        # Importante: Volvemos a generar ruido para independencia estocástica o usamos el mismo. Usaremos nuevo.
+        noise = torch.randn(BATCH_SIZE, NOISE_DIM, device=device)
+        # Necesitamos embeddings frescos si el encoder cambió? 
+        # En este paso, el encoder ya se actualizó en Fase A. 
+        # Podríamos re-ejecutar encoder() si queremos ser muy precisos, pero es costoso. 
+        # Asumiremos que el cambio es pequeño o usamos .detach() en encoder para G.
+        # Generalmente G toma input fijo o del encoder.
+        # Para que el gradiente fluya SOLO a G y no a Encoder (que es del policía), detachamos input de G.
+        
+        fake_u_emb_g = generator(real_p_emb.detach(), noise)
+        pred_fake_g = discriminator(real_p_emb.detach(), fake_u_emb_g)
+        
+        # El Criminal quiere engañar al policía -> Label Target = 1
+        label_g = torch.ones_like(pred_fake_g)
+        loss_g = criterion(pred_fake_g, label_g)
+        
+        loss_g.backward()
+        opt_g.step()
+        
+        # ---------------------
+        # LOGS
+        # ---------------------
         if epoch % 20 == 0:
-            print(f"      Epoch {epoch:03d} | Loss: {loss.item():.4f}")
+            print(f"Epoch {epoch:03d} | Loss D (Policía): {loss_d.item():.4f} | Loss G (Criminal): {loss_g.item():.4f}")
 
-    # 5. GUARDAR MODELO
-    torch.save(model.state_dict(), model_path)
-    print(f"\nModelo guardado exitosamente en: {model_path}")
+    # --- GUARDAR SOLO EL POLICÍA (Discriminator + Encoder) ---
+    # Para predicción necesitamos:
+    # 1. Encoder (para saber quién es quién en el grafo)
+    # 2. Discriminator (para calcular la probabilidad de crimen)
+    
+    # Guardaremos un diccionario con ambos estados
+    final_state = {
+        'encoder': encoder.state_dict(),
+        'discriminator': discriminator.state_dict()
+    }
+    torch.save(final_state, save_path)
+    print(f"\nEntrenamiento Finalizado.")
+    print(f"Agente Pre-Crimen (Policía) guardado en: {save_path}")
 
 if __name__ == "__main__":
     entrenar_policia()
