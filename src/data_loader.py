@@ -6,7 +6,6 @@ Reemplaza etl_policial.py para trabajar con el nuevo city_generator.py
 import torch
 from neo4j import GraphDatabase
 from torch_geometric.data import HeteroData
-import numpy as np
 
 
 class MadridDataLoader:
@@ -14,6 +13,10 @@ class MadridDataLoader:
     Carga datos desde Neo4j para el sistema Minority Report.
     Trabaja con coordenadas REALES de Madrid (no normalizadas).
     """
+    
+    # Coordenadas por defecto para nodos sin datos
+    DEFAULT_LAT = 40.416775  # Centro de Madrid
+    DEFAULT_LON = -3.703790
     
     def __init__(self, uri, auth):
         self.driver = GraphDatabase.driver(uri, auth=auth)
@@ -71,8 +74,8 @@ class MadridDataLoader:
                 
                 # Extraer valores
                 value = record[value_field] if record[value_field] is not None else 0.0
-                lat = record['lat'] if record['lat'] is not None else 40.416775  # Centro Madrid
-                lon = record['lon'] if record['lon'] is not None else -3.703790
+                lat = record['lat'] if record['lat'] is not None else self.DEFAULT_LAT
+                lon = record['lon'] if record['lon'] is not None else self.DEFAULT_LON
                 
                 # Vector de características [value, lat, lon] - SIN NORMALIZACIÓN
                 feat_vec = [float(value), float(lat), float(lon)]

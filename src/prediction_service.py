@@ -75,6 +75,7 @@ class PredictionService:
         self.loader.load_nodes()
         self.loader.load_edges()
         self.data = self.loader.get_data().to(self.device)
+        self.loader.close()  # Close connection after loading
         
         # 3. Cargar Modelos
         print("   -> Loading pre-trained models...")
