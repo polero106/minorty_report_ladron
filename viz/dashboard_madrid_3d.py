@@ -9,9 +9,11 @@ import hvplot.pandas
 import networkx as nx
 import plotly.graph_objects as go
 from bokeh.plotting import figure, from_networkx
-from bokeh.models import HoverTool, ColumnDataSource
+from bokeh.models import HoverTool, ColumnDataSource, Label
 from bokeh.palettes import Category20
 import torch
+from datetime import datetime, timedelta
+import math
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -54,6 +56,100 @@ def peligrosidad_to_color(peligrosidad):
         b = int(0)
     
     return [r, g, b, 200]  # Alpha = 200 para translucidez
+
+def create_temporal_radar_chart(df_pred):
+    """Genera Spider Chart de riesgo por hora del día (0-23h)"""
+    from bokeh.models import Range1d
+    
+    # DATOS SINTÉTICOS (temporal): Simulación de distribución horaria
+    # TODO: En producción, extraer de df_pred con columna 'timestamp' o 'hora'
+    # Ejemplo: df_pred['hora'] = pd.to_datetime(df_pred['timestamp']).dt.hour
+    #          risk_by_hour = df_pred.groupby('hora')['probabilidad'].mean().reindex(range(24), fill_value=0).tolist()
+    
+    hours = list(range(24))
+    
+    # Verificar si hay datos temporales reales
+    if 'timestamp' in df_pred.columns or 'hora' in df_pred.columns:
+        # Extraer hora si existe timestamp
+        if 'timestamp' in df_pred.columns:
+            df_pred['hora_temp'] = pd.to_datetime(df_pred['timestamp'], errors='coerce').dt.hour
+        else:
+            df_pred['hora_temp'] = df_pred['hora']
+        
+        # Calcular riesgo promedio por hora
+        hourly_risk = df_pred.groupby('hora_temp')['probabilidad'].mean()
+        risk_by_hour = [hourly_risk.get(h, 0.2) for h in hours]
+        
+        # Normalizar a rango 0-1
+        max_risk = max(risk_by_hour) if max(risk_by_hour) > 0 else 1
+        risk_by_hour = [r / max_risk for r in risk_by_hour]
+    else:
+        # DATOS SINTÉTICOS: Patrón típico de criminalidad urbana
+        # Basado en estudios criminológicos: picos nocturnos (22-04h) y tarde (18-20h)
+        risk_by_hour = [
+            0.3, 0.2, 0.15, 0.25, 0.4, 0.3, 0.2, 0.15, 0.2, 0.3,  # 00-09h (madrugada activa, mañana baja)
+            0.4, 0.5, 0.6, 0.5, 0.4, 0.3, 0.35, 0.4, 0.5, 0.6,    # 10-19h (mediodía-tarde)
+            0.7, 0.8, 0.9, 0.7  # 20-23h (pico nocturno)
+        ]
+        
+        # Escalar según cantidad de predicciones
+        if len(df_pred) > 10:
+            scale_factor = min(len(df_pred) / 100.0, 1.0)
+            risk_by_hour = [r * scale_factor for r in risk_by_hour]
+    
+    # Configurar gráfico radial
+    p = figure(
+        width=400, height=400,
+        title="🕒 Patrón Temporal de Crimen (24h)",
+        toolbar_location=None,
+        x_range=Range1d(-1.2, 1.2),
+        y_range=Range1d(-1.2, 1.2),
+        background_fill_color="#000000",
+        border_fill_color="#000000"
+    )
+    
+    # Ocultar ejes
+    p.xaxis.visible = False
+    p.yaxis.visible = False
+    p.grid.visible = False
+    
+    # Dibujar rejilla circular (3 anillos)
+    for radius in [0.33, 0.66, 1.0]:
+        angles = np.linspace(0, 2*np.pi, 100)
+        xs = radius * np.cos(angles)
+        ys = radius * np.sin(angles)
+        p.line(xs, ys, color="#333333", alpha=0.3, line_width=1)
+    
+    # Dibujar líneas radiales (cada 3 horas)
+    for hour in [0, 3, 6, 9, 12, 15, 18, 21]:
+        angle = (hour / 24) * 2 * np.pi - np.pi/2  # Empezar en 12 (top)
+        p.line([0, np.cos(angle)], [0, np.sin(angle)], color="#333333", alpha=0.3, line_width=1)
+    
+    # Crear polígono de datos
+    angles_data = [(h / 24) * 2 * np.pi - np.pi/2 for h in hours]
+    xs = [risk_by_hour[i] * np.cos(angles_data[i]) for i in range(24)]
+    ys = [risk_by_hour[i] * np.sin(angles_data[i]) for i in range(24)]
+    
+    # Cerrar el polígono
+    xs.append(xs[0])
+    ys.append(ys[0])
+    
+    # Dibujar área rellena (cian translúcido)
+    p.patch(xs, ys, color="#00FFFF", alpha=0.4, line_width=2, line_color="#00FFFF")
+    
+    # Añadir etiquetas de hora (0, 6, 12, 18)
+    label_hours = [0, 6, 12, 18]
+    label_texts = ["00h", "06h", "12h", "18h"]
+    for hour, text in zip(label_hours, label_texts):
+        angle = (hour / 24) * 2 * np.pi - np.pi/2
+        label_x = 1.15 * np.cos(angle)
+        label_y = 1.15 * np.sin(angle)
+        label = Label(x=label_x, y=label_y, text=text, 
+                     text_font_size="10pt", text_color="#00FFFF",
+                     text_align="center", text_baseline="middle")
+        p.add_layout(label)
+    
+    return p
 
 # ==============================================================================
 # 1. CONFIGURACIÓN E INICIALIZACIÓN
@@ -186,19 +282,28 @@ btn_predict = pn.widgets.Button(
     sizing_mode='stretch_width'
 )
 
-# KPIS HUMANIZADOS
+# KPIS HUMANIZADOS CON NEÓN
 kpi_total = pn.indicators.Number(
     name='Amenazas Detectadas', 
     value=0, 
     format='{value}', 
-    colors=[(100, 'white'), (1000, 'orange'), (50000, 'red')]
+    colors=[(100, 'white'), (1000, 'orange'), (50000, 'red')],
+    font_size='28pt'
 )
 
 kpi_status = pn.pane.Markdown("## 🟢 Sistema Estable", styles={'color': '#00ff00', 'text-align': 'center'})
 
-kpi_prob_label = pn.indicators.String(name='Nivel de Riesgo', value='BAJO')
+# KPI Riesgo con Markdown custom para control total
+kpi_prob_label = pn.pane.Markdown(
+    "<div style='text-align:center;'><p style='color:#888; font-size:12pt; margin:0;'>Nivel de Riesgo</p><h2 style='color:#00FF00; font-size:24pt; margin:5px 0;'>BAJO</h2></div>",
+    sizing_mode='stretch_width'
+)
 
-kpi_critical_zone = pn.indicators.String(name='Zona Crítica', value='-')
+# KPI Zona Crítica con Markdown custom
+kpi_critical_zone = pn.pane.Markdown(
+    "<div style='text-align:center;'><p style='color:#888; font-size:12pt; margin:0;'>Zona Crítica</p><h2 style='color:#00FFFF; font-size:24pt; margin:5px 0;'>-</h2></div>",
+    sizing_mode='stretch_width'
+)
 
 # Contenedor de gráficos
 row_plots = pn.Row(min_height=350, sizing_mode='stretch_width')
@@ -216,17 +321,32 @@ zones_map_pane = pn.pane.DeckGL(
     sizing_mode='stretch_width'
 )
 
-# KPI: Índice de Amenaza Inminente (Gauge visual)
+# KPI: Índice de Amenaza Inminente (Gauge visual con colores dinámicos)
 kpi_threat_index = pn.indicators.Gauge(
-    name='Índice de Amenaza Inminente (%)', 
+    name='🎯 Índice de Amenaza', 
     value=0, 
     bounds=(0, 100),
-    width=300,
-    height=300
+    colors=[(50, '#00FFFF'), (75, '#FFA500'), (100, '#FF0000')],  # Cian -> Naranja -> Rojo
+    width=350,
+    height=250
 )
 
 # Grafo de Red de Sospechosos (contenedor dinámico)
 network_plot = pn.Column()
+
+# Radar Chart Temporal (24h)
+radar_chart_pane = pn.pane.Bokeh(sizing_mode='stretch_width', min_height=400)
+
+# Heatmap de Densidad Mejorado
+heatmap_pane = pn.pane.DeckGL(
+    pdk.Deck(
+        initial_view_state=INITIAL_VIEW_STATE,
+        layers=[],
+        map_style=MAP_STYLE
+    ),
+    min_height=400,
+    sizing_mode='stretch_width'
+)
 
 # ==============================================================================
 # 4. LÓGICA DE CALLBACK
@@ -259,10 +379,9 @@ def run_prediction(event):
             kpi_total.value = 0
             kpi_status.object = "## 🟢 Sistema Estable"
             kpi_status.styles = {'color': '#00ff00', 'text-align': 'center'}
-            kpi_prob_label.value = "BAJO"
+            kpi_prob_label.object = "<div style='text-align:center;'><p style='color:#888; font-size:12pt; margin:0;'>Nivel de Riesgo</p><h2 style='color:#00FF00; font-size:24pt; margin:5px 0;'>BAJO</h2></div>"
             kpi_threat_index.value = 0
-            kpi_threat_index.styles = {'color': '#00ffff'}
-            kpi_critical_zone.value = "-"
+            kpi_critical_zone.object = "<div style='text-align:center;'><p style='color:#888; font-size:12pt; margin:0;'>Zona Crítica</p><h2 style='color:#00FFFF; font-size:24pt; margin:5px 0;'>-</h2></div>"
             row_plots.objects = [pn.pane.Markdown("### 🛡️ Sin actividad criminal detectada.")]
             network_plot.clear()
             network_plot.append(pn.pane.Markdown("### 🛡️ Sin red de sospechosos."))
@@ -290,24 +409,26 @@ def run_prediction(event):
             kpi_status.object = text_status
             kpi_status.styles = {'color': color_status, 'text-align': 'center'}
             
-            # 2. KPI PROBABILIDAD (HUMANIZADO)
+            # 2. KPI PROBABILIDAD (HUMANIZADO CON COLORES NEÓN)
             if max_prob > 0.90:
-                kpi_prob_label.value = "RIESGO INMINENTE"
+                risk_text = "RIESGO INMINENTE"
+                risk_color = "#FF0000"  # Rojo neón
             elif max_prob > 0.70:
-                kpi_prob_label.value = "RIESGO ALTO"
+                risk_text = "RIESGO ALTO"
+                risk_color = "#FF8C00"  # Naranja neón
             else:
-                kpi_prob_label.value = "RIESGO MEDIO"
+                risk_text = "RIESGO MEDIO"
+                risk_color = "#FFA500"  # Naranja claro
             
-            # ACTUALIZAR GAUGE DE AMENAZA INMINENTE
-            if threat_index_percent < 50:
-                kpi_threat_index.styles = {'color': '#00ffff'}  # Cian
-            else:
-                kpi_threat_index.styles = {'color': '#ff0000', 'animation': 'blink 1s infinite'}  # Rojo parpadeante
+            kpi_prob_label.object = f"<div style='text-align:center; border: 2px solid {risk_color}; border-radius:8px; padding:10px;'><p style='color:#888; font-size:12pt; margin:0;'>Nivel de Riesgo</p><h2 style='color:{risk_color}; font-size:26pt; margin:5px 0; text-shadow: 0 0 10px {risk_color};'>{risk_text}</h2></div>"
+            
+            # ACTUALIZAR GAUGE DE AMENAZA INMINENTE (colores automáticos por configuración)
             kpi_threat_index.value = threat_index_percent
                 
-            # 3. KPI ZONA CRÍTICA (ID Simple)
+            # 3. KPI ZONA CRÍTICA (ID Simple CON NEÓN)
             top_zone_id = df_pred['id_ubicacion'].mode()[0]
-            kpi_critical_zone.value = top_zone_id
+            zone_color = "#FF3333" if threat_index_percent > 75 else "#FF8C00" if threat_index_percent > 50 else "#00FFFF"
+            kpi_critical_zone.object = f"<div style='text-align:center; border: 2px solid {zone_color}; border-radius:8px; padding:10px;'><p style='color:#888; font-size:12pt; margin:0;'>Zona Crítica</p><h2 style='color:{zone_color}; font-size:26pt; margin:5px 0; text-shadow: 0 0 10px {zone_color};'>{top_zone_id}</h2></div>"
             
             # 4. ACTUALIZAR MAPA (sin puntos de crimen predichos, van en el mapa de abajo)
             deck_pane.object = pdk.Deck(
@@ -450,6 +571,49 @@ def run_prediction(event):
                 traceback.print_exc()
                 network_plot.clear()
                 network_plot.append(pn.pane.Markdown(f"### ⚠️ Error generando mapa: {str(e)}"))
+            
+            # 7. GENERAR RADAR CHART TEMPORAL
+            try:
+                radar_plot = create_temporal_radar_chart(df_pred)
+                radar_chart_pane.object = radar_plot
+            except Exception as e:
+                print(f"Error generando radar chart: {e}")
+            
+            # 8. GENERAR HEATMAP DE DENSIDAD MEJORADO
+            try:
+                # HeatmapLayer para efecto de difuminado suave (sin cuadrados)
+                layer_heatmap = pdk.Layer(
+                    "HeatmapLayer",
+                    data=df_pred,
+                    get_position=["lon_ubicacion", "lat_ubicacion"],
+                    get_weight="probabilidad",
+                    radiusPixels=80,      # Radio más grande para difuminado suave
+                    intensity=1.5,        # Intensidad moderada
+                    threshold=0.02,       # Threshold bajo para más cobertura
+                    colorRange=[
+                        [0, 0, 255, 0],       # Azul totalmente transparente (fondo)
+                        [0, 255, 255, 80],    # Cian (bajo riesgo)
+                        [0, 255, 0, 120],     # Verde (riesgo medio-bajo)
+                        [255, 255, 0, 160],   # Amarillo (riesgo medio)
+                        [255, 128, 0, 200],   # Naranja (riesgo alto)
+                        [255, 0, 0, 255]      # Rojo intenso (riesgo crítico)
+                    ]
+                )
+                
+                # Usar solo HeatmapLayer para efecto suave y continuo
+                heatmap_pane.object = pdk.Deck(
+                    initial_view_state=INITIAL_VIEW_STATE,
+                    layers=[layer_heatmap],
+                    map_style=MAP_STYLE,
+                    tooltip={
+                        "html": "<b>🔥 Densidad de Crimen</b><br>Zona de alta actividad criminal",
+                        "style": {"backgroundColor": "#000", "color": "#FF0000"}
+                    }
+                )
+            except Exception as e:
+                print(f"Error generando heatmap: {e}")
+                import traceback
+                traceback.print_exc()
 
     except Exception as e:
         error_msg = f"Error crítico: {str(e)}"
@@ -484,20 +648,21 @@ template = pn.template.MaterialTemplate(
     ],
     main=[
         pn.Row(
-            pn.Card(kpi_status, title="Estado", sizing_mode='stretch_width'),
-            pn.Card(kpi_total, title="Amenazas Activas", sizing_mode='stretch_width'),
-            pn.Card(kpi_prob_label, title="Probabilidad Máxima", sizing_mode='stretch_width'),
-            pn.Card(kpi_critical_zone, title="Zona Crítica", sizing_mode='stretch_width'),
+            pn.Card(kpi_status, title="Estado", sizing_mode='stretch_width', styles={'border': '2px solid #00ff00', 'background': '#0a0a0a'}),
+            pn.Card(kpi_total, title="Amenazas Activas", sizing_mode='stretch_width', styles={'background': '#0a0a0a'}),
+            pn.Card(kpi_prob_label, title="", sizing_mode='stretch_width', styles={'background': '#0a0a0a'}),
+            pn.Card(kpi_critical_zone, title="", sizing_mode='stretch_width', styles={'background': '#0a0a0a'}),
             sizing_mode='stretch_width'
         ),
         pn.Row(
-            pn.Card(kpi_threat_index, title="🎯 Índice de Amenaza Inminente", sizing_mode='stretch_width'),
+            pn.Card(kpi_threat_index, title="", sizing_mode='stretch_width', styles={'background': '#000'}),
+            pn.Card(radar_chart_pane, title="🕒 Patrón Temporal de Riesgo", sizing_mode='stretch_width', header_background='#111', styles={'background': '#000'}),
             sizing_mode='stretch_width'
         ),
-        pn.Card(deck_pane, title="📍 Visualización Geoespacial en Tiempo Real", sizing_mode='stretch_both', min_height=600, header_background='#111'),
+        pn.Card(deck_pane, title="📍 Mapa Táctico 3D - LEYENDA: 🔵 Personas | 🟡 Ubicaciones | 🔴 Crímenes", sizing_mode='stretch_both', min_height=600, header_background='#111', styles={'background': '#000'}),
         pn.Row(
-            pn.Card(row_plots, title="🌡️ Mapa de Saturación de Zonas Peligrosas", sizing_mode='stretch_width', header_background='#111'),
-            pn.Card(network_plot, title="� Mapa de Sospechosos y Zonas Peligrosas", sizing_mode='stretch_width', header_background='#111'),
+            pn.Card(heatmap_pane, title="🔥 Heatmap de Densidad Criminal", sizing_mode='stretch_width', header_background='#111', styles={'background': '#000'}),
+            pn.Card(network_plot, title="🎯 Mapa de Sospechosos de Alto Riesgo", sizing_mode='stretch_width', header_background='#111', styles={'background': '#000'}),
             sizing_mode='stretch_width'
         )
     ]
