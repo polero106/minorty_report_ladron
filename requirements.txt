@@ -1,0 +1,29 @@
+# Conexión con Base de Datos
+neo4j>=5.0.0
+
+# Deep Learning y Grafos
+torch>=2.0.0
+torch-geometric>=2.3.0
+
+# Manipulación de Datos (ETL)
+pandas
+numpy
+
+# Geoespacial y Grafos de Calles
+osmnx
+networkx
+
+# Visualización y Dashboard
+panel
+hvplot
+geoviews
+mapbox
+pydeck
+streamlit
+watchdog
+scipy
+plotly
+
+# Utilities
+python-dotenv
+faker
