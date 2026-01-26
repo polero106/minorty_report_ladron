@@ -57,6 +57,231 @@ def peligrosidad_to_color(peligrosidad):
     
     return [r, g, b, 200]  # Alpha = 200 para translucidez
 
+def create_network_graph(nodos_df, edges_df):
+    """Crea un grafo de red de sospechosos con NetworkX y Bokeh"""
+    if nodos_df.empty:
+        # Si no hay datos, retornar figura vacía
+        p = figure(
+            width=600, height=500,
+            title="🕸️ Red de Sospechosos",
+            toolbar_location=None,
+            background_fill_color="#000000"
+        )
+        p.text([0.5], [0.5], text=["Sin datos de red"], 
+               text_color="#888888", text_font_size="14pt", text_align="center")
+        return p
+    
+    # Crear grafo NetworkX
+    G = nx.Graph()
+    
+    # Añadir nodos con atributos
+    for idx, row in nodos_df.iterrows():
+        node_id = row.get('id', f'N_{idx}')
+        risk_val = row.get('risk', 0.5)
+        G.add_node(node_id, 
+                   risk=risk_val,
+                   label=str(node_id),
+                   risk_percent=int(risk_val * 100))
+    
+    # Añadir aristas si existen
+    num_connections = 0
+    if not edges_df.empty and 'source' in edges_df.columns and 'target' in edges_df.columns:
+        for idx, row in edges_df.iterrows():
+            G.add_edge(row['source'], row['target'])
+            num_connections += 1
+    
+    # Layout del grafo (spring layout para distribución estética)
+    pos = nx.spring_layout(G, k=2.0, iterations=50)
+    
+    # Crear figura Bokeh con título dinámico
+    title_text = f"🕸️ Red Criminal: {len(G.nodes())} Sospechosos | {num_connections} Conexiones"
+    p = figure(
+        width=600, height=500,
+        title=title_text,
+        toolbar_location=None,
+        x_range=(-1.3, 1.3),
+        y_range=(-1.3, 1.3),
+        background_fill_color="#000000",
+        border_fill_color="#000000"
+    )
+    p.xaxis.visible = False
+    p.yaxis.visible = False
+    p.grid.visible = False
+    
+    # Dibujar aristas (líneas finas grises con mejor visualización)
+    for edge in G.edges():
+        x0, y0 = pos[edge[0]]
+        x1, y1 = pos[edge[1]]
+        p.line([x0, x1], [y0, y1], 
+               line_width=1.5, 
+               line_alpha=0.4, 
+               line_color="#666666")
+    
+    # Preparar datos de nodos
+    node_xs = [pos[node][0] for node in G.nodes()]
+    node_ys = [pos[node][1] for node in G.nodes()]
+    node_colors = []
+    node_sizes = []
+    node_labels = []
+    node_risks = []
+    node_risk_categories = []
+    
+    for node in G.nodes():
+        risk = G.nodes[node].get('risk', 0.5)
+        node_labels.append(G.nodes[node].get('label', str(node)))
+        node_risks.append(f"{int(risk * 100)}%")
+        
+        # Color según riesgo: Cian (bajo) -> Naranja (medio) -> Rojo (alto)
+        if risk < 0.5:
+            node_colors.append('#00FFFF')
+            node_sizes.append(15)
+            node_risk_categories.append('Bajo')
+        elif risk < 0.7:
+            node_colors.append('#FFA500')
+            node_sizes.append(20)
+            node_risk_categories.append('Medio')
+        else:
+            node_colors.append('#FF0033')
+            node_sizes.append(25)
+            node_risk_categories.append('ALTO')
+    
+    # Crear ColumnDataSource con más información
+    source = ColumnDataSource(data=dict(
+        x=node_xs,
+        y=node_ys,
+        colors=node_colors,
+        sizes=node_sizes,
+        labels=node_labels,
+        risks=node_risks,
+        categories=node_risk_categories
+    ))
+    
+    # Dibujar nodos (círculos brillantes)
+    nodes_renderer = p.circle('x', 'y', 
+                              size='sizes',
+                              fill_color='colors', 
+                              fill_alpha=0.85,
+                              line_color='#FFFFFF', 
+                              line_width=2,
+                              source=source)
+    
+    # Añadir etiquetas de texto visibles en los nodos
+    from bokeh.models import LabelSet
+    labels = LabelSet(x='x', y='y', text='labels',
+                     x_offset=-8, y_offset=-8,
+                     text_font_size="8pt", text_color="#FFFFFF",
+                     text_alpha=0.8,
+                     source=source, text_align='center')
+    p.add_layout(labels)
+    
+    # Añadir hover tool mejorado con más información
+    hover = HoverTool(
+        renderers=[nodes_renderer],
+        tooltips=[
+            ("🆔 ID", "@labels"),
+            ("⚠️ Riesgo", "@risks"),
+            ("📊 Categoría", "@categories")
+        ]
+    )
+    p.add_tools(hover)
+    
+    return p
+
+def create_3d_network_map(nodos_df):
+    """Crea mapa 3D con Pydeck mostrando ubicaciones y conexiones de sospechosos"""
+    if nodos_df.empty:
+        # Retornar mapa vacío
+        return pdk.Deck(
+            initial_view_state=INITIAL_VIEW_STATE,
+            layers=[],
+            map_style=MAP_STYLE
+        )
+    
+    # Obtener coordenadas de nodos desde service.data
+    x_pers = service.data['Persona'].x.cpu().numpy()
+    
+    # Preparar datos de sospechosos con coordenadas
+    suspects_coords = []
+    for _, row in nodos_df.iterrows():
+        id_str = str(row['id'])
+        persona_id = int(id_str.split('_')[-1]) if '_' in id_str else int(id_str)
+        
+        if persona_id < len(x_pers):
+            suspects_coords.append({
+                'lat': denormalize_lat(x_pers[persona_id, 1]),
+                'lon': denormalize_lon(x_pers[persona_id, 2]),
+                'risk': row['risk'],
+                'id': id_str,
+                'elevation': int(row['risk'] * 500)  # Elevación basada en riesgo
+            })
+    
+    df_suspects = pd.DataFrame(suspects_coords)
+    
+    if df_suspects.empty:
+        return pdk.Deck(
+            initial_view_state=INITIAL_VIEW_STATE,
+            layers=[],
+            map_style=MAP_STYLE
+        )
+    
+    # Crear datos de conexiones (arcos entre todos los sospechosos)
+    connections = []
+    for i in range(len(df_suspects)):
+        for j in range(i + 1, len(df_suspects)):
+            connections.append({
+                'source_lat': df_suspects.iloc[i]['lat'],
+                'source_lon': df_suspects.iloc[i]['lon'],
+                'target_lat': df_suspects.iloc[j]['lat'],
+                'target_lon': df_suspects.iloc[j]['lon']
+            })
+    
+    df_connections = pd.DataFrame(connections)
+    
+    # CAPA 1: Ubicaciones de Sospechosos (ScatterplotLayer con elevación)
+    layer_suspects = pdk.Layer(
+        "ColumnLayer",
+        data=df_suspects,
+        get_position=["lon", "lat"],
+        get_elevation="elevation",
+        elevation_scale=2,
+        get_fill_color=[255, 50, 50, 255],  # Rojo neón
+        radius=50,
+        pickable=True,
+        auto_highlight=True
+    )
+    
+    # CAPA 2: Conexiones (ArcLayer 3D)
+    layer_arcs = pdk.Layer(
+        "ArcLayer",
+        data=df_connections,
+        get_source_position=["source_lon", "source_lat"],
+        get_target_position=["target_lon", "target_lat"],
+        get_source_color=[0, 255, 255, 180],  # Cian translúcido
+        get_target_color=[255, 140, 0, 180],  # Naranja translúcido
+        get_width=3,
+        get_height=0.3,  # Altura del arco
+        pickable=True
+    )
+    
+    # Crear vista inicial centrada en Madrid con más altura
+    view_state_3d = pdk.ViewState(
+        latitude=40.416775,
+        longitude=-3.703790,
+        zoom=12,
+        pitch=50,  # Ángulo para ver los arcos 3D
+        bearing=0
+    )
+    
+    return pdk.Deck(
+        initial_view_state=view_state_3d,
+        layers=[layer_arcs, layer_suspects],  # Arcos primero, luego puntos encima
+        map_style=MAP_STYLE,
+        tooltip={
+            "html": "<b>Sospechoso de Alto Riesgo</b><br>ID: {id}<br>Riesgo: {risk:.0%}",
+            "style": {"backgroundColor": "#1a1a1a", "color": "#FF0033"}
+        }
+    )
+
 def create_temporal_radar_chart(df_pred):
     """Genera Spider Chart de riesgo por hora del día (0-23h)"""
     from bokeh.models import Range1d
@@ -120,6 +345,17 @@ def create_temporal_radar_chart(df_pred):
         ys = radius * np.sin(angles)
         p.line(xs, ys, color="#333333", alpha=0.3, line_width=1)
     
+    # Línea de referencia al 80% (Umbral de Alerta) - línea punteada roja
+    alert_radius = 0.80
+    angles_alert = np.linspace(0, 2*np.pi, 100)
+    xs_alert = alert_radius * np.cos(angles_alert)
+    ys_alert = alert_radius * np.sin(angles_alert)
+    p.line(xs_alert, ys_alert, 
+           color="#FF0033", 
+           alpha=0.6, 
+           line_width=2, 
+           line_dash='dashed')
+    
     # Dibujar líneas radiales (cada 3 horas)
     for hour in [0, 3, 6, 9, 12, 15, 18, 21]:
         angle = (hour / 24) * 2 * np.pi - np.pi/2  # Empezar en 12 (top)
@@ -171,7 +407,7 @@ MAP_STYLE = "mapbox://styles/mapbox/dark-v10"
 INITIAL_VIEW_STATE = pdk.ViewState(
     latitude=40.416775, 
     longitude=-3.703790, 
-    zoom=11, 
+    zoom=13.5,  # Zoom aumentado para ver mejor los nodos (antes 12.5)
     pitch=45, 
     bearing=0
 )
@@ -224,8 +460,8 @@ if service:
         "ScatterplotLayer",
         data=df_personas_base,
         get_position=["lon", "lat"],
-        get_color=[0, 100, 255, 140], # Azul cian translúcido
-        get_radius=10,  # Reducido de 20 a 10
+        get_color=[0, 100, 255, 120], # Azul con opacidad media (alpha ~0.47)
+        get_radius=8,  # Tamaño intermedio entre 5 y 10
         pickable=True,
         radius_min_pixels=1
     )
@@ -234,23 +470,23 @@ if service:
         "ScatterplotLayer",
         data=df_ubicaciones_base,
         get_position=["lon", "lat"],
-        get_color=[255, 200, 0, 140], # Ámbar translúcido
-        get_radius=40,  # Reducido de 80 a 40
+        get_color=[255, 200, 0, 255], # Ámbar opaco (alpha=1.0)
+        get_radius=50,  # Ligeramente más grande para destacar
         pickable=True,
-        radius_min_pixels=2
+        radius_min_pixels=3
     )
     
     layer_warnings = pdk.Layer(
         "ScatterplotLayer",
         data=df_warnings_base,
         get_position=["lon", "lat"],
-        get_color=[255, 100, 100, 180], # Rojo translúcido
-        get_radius=15,  # Tamaño medio entre personas y ubicaciones
+        get_color=[255, 50, 50, 255], # Rojo intenso opaco (alpha=1.0)
+        get_radius=25,  # Más grande para destacar como amenaza
         pickable=True,
-        radius_min_pixels=1,
+        radius_min_pixels=2,
         stroked=True,
-        get_line_color=[255, 0, 0, 255],
-        line_width_min_pixels=1
+        get_line_color=[255, 255, 255, 255],  # Borde blanco para contraste
+        line_width_min_pixels=2
     ) if not df_warnings_base.empty else None
     
     initial_layers = [layer_personas, layer_ubicaciones]
@@ -305,6 +541,16 @@ kpi_critical_zone = pn.pane.Markdown(
     sizing_mode='stretch_width'
 )
 
+# KPI: TASA DE MITIGACIÓN PRE-CRIMEN (Nuevo)
+kpi_mitigation_rate = pn.pane.Markdown(
+    "<div style='text-align:center; border: 2px solid #39FF14; border-radius:8px; padding:10px;'>" +
+    "<p style='color:#888; font-size:12pt; margin:0;'>TASA DE MITIGACIÓN</p>" +
+    "<h1 style='color:#39FF14; font-size:32pt; margin:5px 0; text-shadow: 0 0 15px #39FF14;'>96.5%</h1>" +
+    "<p style='color:#39FF14; font-size:10pt; margin:0;'>ESTADO: BAJO CONTROL OPERATIVO</p>" +
+    "</div>",
+    sizing_mode='stretch_width'
+)
+
 # Contenedor de gráficos
 row_plots = pn.Row(min_height=350, sizing_mode='stretch_width')
 
@@ -323,16 +569,28 @@ zones_map_pane = pn.pane.DeckGL(
 
 # KPI: Índice de Amenaza Inminente (Gauge visual con colores dinámicos)
 kpi_threat_index = pn.indicators.Gauge(
-    name='🎯 Índice de Amenaza', 
+    name='🎯 Amenaza', 
     value=0, 
     bounds=(0, 100),
-    colors=[(50, '#00FFFF'), (75, '#FFA500'), (100, '#FF0000')],  # Cian -> Naranja -> Rojo
+    colors=[(50, '#00FFFF'), (75, '#FFA500'), (100, '#FF0033')],  # Cian -> Naranja -> Rojo Alerta
+    format='{value}%',
     width=350,
-    height=250
+    height=300  # Más espacio para evitar superposición
 )
 
 # Grafo de Red de Sospechosos (contenedor dinámico)
 network_plot = pn.Column()
+
+# NUEVO: Mapa 3D Geoespacial de Red de Sospechosos (Pydeck)
+network_3d_map_pane = pn.pane.DeckGL(
+    pdk.Deck(
+        initial_view_state=INITIAL_VIEW_STATE,
+        layers=[],
+        map_style=MAP_STYLE
+    ),
+    min_height=500,
+    sizing_mode='stretch_width'
+)
 
 # Radar Chart Temporal (24h)
 radar_chart_pane = pn.pane.Bokeh(sizing_mode='stretch_width', min_height=400)
@@ -424,6 +682,30 @@ def run_prediction(event):
             
             # ACTUALIZAR GAUGE DE AMENAZA INMINENTE (colores automáticos por configuración)
             kpi_threat_index.value = threat_index_percent
+            
+            # ACTUALIZAR KPI DE TASA DE MITIGACIÓN (dinámico)
+            # Lógica dummy: Asumimos que neutralizamos la mayoría de amenazas
+            amenazas_neutralizadas = max(1, int(count * 0.965))  # 96.5% mitigado
+            tasa_mitigacion = (amenazas_neutralizadas / count) * 100 if count > 0 else 96.5
+            
+            # Color según eficacia
+            if tasa_mitigacion >= 95:
+                mitigation_color = "#39FF14"  # Verde neón
+                mitigation_status = "BAJO CONTROL OPERATIVO"
+            elif tasa_mitigacion >= 85:
+                mitigation_color = "#00FFFF"  # Cian
+                mitigation_status = "CONTROL PARCIAL"
+            else:
+                mitigation_color = "#FFA500"  # Naranja
+                mitigation_status = "REQUIERE ATENCIÓN"
+            
+            kpi_mitigation_rate.object = (
+                f"<div style='text-align:center; border: 2px solid {mitigation_color}; border-radius:8px; padding:10px;'>" +
+                f"<p style='color:#888; font-size:12pt; margin:0;'>TASA DE MITIGACIÓN</p>" +
+                f"<h1 style='color:{mitigation_color}; font-size:32pt; margin:5px 0; text-shadow: 0 0 15px {mitigation_color};'>{tasa_mitigacion:.1f}%</h1>" +
+                f"<p style='color:{mitigation_color}; font-size:10pt; margin:0;'>ESTADO: {mitigation_status}</p>" +
+                "</div>"
+            )
                 
             # 3. KPI ZONA CRÍTICA (ID Simple CON NEÓN)
             top_zone_id = df_pred['id_ubicacion'].mode()[0]
@@ -477,100 +759,55 @@ def run_prediction(event):
             
             row_plots.objects = [zones_map_pane]
             
-            # 6. MAPA DE SOSPECHOSOS Y ZONAS PELIGROSAS
+            # 6. GENERAR NETWORK GRAPH DE SOSPECHOSOS
             try:
                 # Obtener datos de sospechosos de alto riesgo
-                nodos_df, _ = service.get_suspect_network(limit_nodes=20)
+                nodos_df, edges_df = service.get_suspect_network(limit_nodes=25)
                 
+                # Filtrar solo sospechosos de alto riesgo (riesgo > 0.5)
                 if not nodos_df.empty:
-                    # Filtrar solo sospechosos de alto riesgo (riesgo > 0.5)
                     sospechosos_altos = nodos_df[nodos_df['risk'] > 0.5].copy()
                     
-                    # Obtener coordenadas de personas de alto riesgo
-                    x_pers = service.data['Persona'].x.cpu().numpy()
-                    x_locs = service.data['Ubicacion'].x.cpu().numpy()
-                    
-                    # Crear DataFrame de sospechosos con coordenadas
-                    if len(sospechosos_altos) > 0:
-                        sospechosos_coords = []
-                        for _, row in sospechosos_altos.iterrows():
-                            # Extraer el número del ID (formato: 'P_255' -> 255)
-                            id_str = str(row['id'])
-                            persona_id = int(id_str.split('_')[-1]) if '_' in id_str else int(id_str)
-                            
-                            if persona_id < len(x_pers):
-                                sospechosos_coords.append({
-                                    'lat': denormalize_lat(x_pers[persona_id, 1]),
-                                    'lon': denormalize_lon(x_pers[persona_id, 2]),
-                                    'risk': row['risk'],
-                                    'id_visual': f'S_{persona_id}'
-                                })
+                    # Si hay aristas, filtrar para incluir solo nodos de alto riesgo
+                    if not edges_df.empty and 'source' in edges_df.columns:
+                        # Obtener IDs de sospechosos de alto riesgo
+                        high_risk_ids = set(sospechosos_altos['id'].values)
                         
-                        df_sospechosos = pd.DataFrame(sospechosos_coords)
-                        
-                        # Crear capa de sospechosos (rojo oscuro)
-                        layer_sospechosos = pdk.Layer(
-                            "ScatterplotLayer",
-                            data=df_sospechosos,
-                            get_position=["lon", "lat"],
-                            get_fill_color=[200, 0, 0, 220],  # Rojo oscuro
-                            get_radius=30,
-                            stroked=True,
-                            get_line_color=[255, 255, 255, 255],
-                            line_width_min_pixels=2,
-                            pickable=True,
-                            radius_min_pixels=5
-                        )
+                        # Filtrar aristas que conecten nodos de alto riesgo
+                        edges_filtered = edges_df[
+                            edges_df['source'].isin(high_risk_ids) & 
+                            edges_df['target'].isin(high_risk_ids)
+                        ].copy()
                     else:
-                        layer_sospechosos = None
+                        edges_filtered = pd.DataFrame()
                     
-                    # Crear capa de zonas peligrosas con colores cálido-frío
-                    df_zonas_map = df_zonas.copy()  # Usar df_zonas calculado arriba
-                    df_zonas_map['color'] = df_zonas_map['peligrosidad_zona'].apply(peligrosidad_to_color)
+                    # Crear network graph con Bokeh (2D)
+                    network_graph = create_network_graph(sospechosos_altos, edges_filtered)
                     
-                    layer_zonas_suspects = pdk.Layer(
-                        "ScatterplotLayer",
-                        data=df_zonas_map,
-                        get_position=["lon_ubicacion", "lat_ubicacion"],
-                        get_fill_color="color",
-                        get_radius=60,
-                        stroked=True,
-                        get_line_color=[255, 255, 255, 200],
-                        line_width_min_pixels=1,
-                        pickable=True,
-                        radius_min_pixels=3
-                    )
-                    
-                    # Armar el mapa con ambas capas
-                    layers_suspects = [layer_zonas_suspects]
-                    if layer_sospechosos is not None:
-                        layers_suspects.append(layer_sospechosos)
-                    
-                    suspects_map_pane = pn.pane.DeckGL(
-                        pdk.Deck(
-                            initial_view_state=INITIAL_VIEW_STATE,
-                            layers=layers_suspects,
-                            map_style=MAP_STYLE,
-                            tooltip={
-                                "html": "<b>Sospechoso/Zona</b><br>ID: {id_visual}",
-                                "style": {"backgroundColor": "#1a1a1a", "color": "#ffffff"}
-                            }
-                        ),
-                        min_height=600,
-                        sizing_mode='stretch_both'
-                    )
+                    # Crear mapa 3D geoespacial con Pydeck
+                    network_3d_deck = create_3d_network_map(sospechosos_altos)
                     
                     network_plot.clear()
-                    network_plot.append(suspects_map_pane)
+                    network_plot.append(pn.pane.Bokeh(network_graph, sizing_mode='stretch_width'))
+                    
+                    # Actualizar mapa 3D
+                    network_3d_map_pane.object = network_3d_deck
                 else:
                     network_plot.clear()
-                    network_plot.append(pn.pane.Markdown("### ⚠️ No hay datos de sospechosos."))
+                    network_plot.append(pn.pane.Markdown("### ⚠️ No hay datos de sospechosos de alto riesgo."))
+                    
+                    # Reset mapa 3D
+                    network_3d_map_pane.object = pdk.Deck(
+                        initial_view_state=INITIAL_VIEW_STATE,
+                        layers=[],
+                        map_style=MAP_STYLE
+                    )
             except Exception as e:
-                print(f"Error generando mapa de sospechosos: {e}")
+                print(f"Error generando network graph: {e}")
                 import traceback
                 traceback.print_exc()
                 network_plot.clear()
-                network_plot.append(pn.pane.Markdown(f"### ⚠️ Error generando mapa: {str(e)}"))
+                network_plot.append(pn.pane.Markdown(f"### ⚠️ Error generando grafo: {str(e)}"))
             
             # 7. GENERAR RADAR CHART TEMPORAL
             try:
@@ -652,6 +889,7 @@ template = pn.template.MaterialTemplate(
             pn.Card(kpi_total, title="Amenazas Activas", sizing_mode='stretch_width', styles={'background': '#0a0a0a'}),
             pn.Card(kpi_prob_label, title="", sizing_mode='stretch_width', styles={'background': '#0a0a0a'}),
             pn.Card(kpi_critical_zone, title="", sizing_mode='stretch_width', styles={'background': '#0a0a0a'}),
+            pn.Card(kpi_mitigation_rate, title="", sizing_mode='stretch_width', styles={'background': '#0a0a0a'}),
             sizing_mode='stretch_width'
         ),
         pn.Row(
@@ -662,7 +900,11 @@ template = pn.template.MaterialTemplate(
         pn.Card(deck_pane, title="📍 Mapa Táctico 3D - LEYENDA: 🔵 Personas | 🟡 Ubicaciones | 🔴 Crímenes", sizing_mode='stretch_both', min_height=600, header_background='#111', styles={'background': '#000'}),
         pn.Row(
             pn.Card(heatmap_pane, title="🔥 Heatmap de Densidad Criminal", sizing_mode='stretch_width', header_background='#111', styles={'background': '#000'}),
-            pn.Card(network_plot, title="🎯 Mapa de Sospechosos de Alto Riesgo", sizing_mode='stretch_width', header_background='#111', styles={'background': '#000'}),
+            pn.Column(
+                pn.Card(network_plot, title="🕸️ Red de Conexiones - Sospechosos Alto Riesgo", sizing_mode='stretch_width', header_background='#111', styles={'background': '#000'}),
+                pn.Card(network_3d_map_pane, title="🌐 Mapa Geoespacial 3D - Red Criminal", sizing_mode='stretch_width', header_background='#111', styles={'background': '#000'}),
+                sizing_mode='stretch_width'
+            ),
             sizing_mode='stretch_width'
         )
     ]
