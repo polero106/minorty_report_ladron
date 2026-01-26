@@ -21,6 +21,8 @@ mapbox
 pydeck
 streamlit
 watchdog
+scipy
+plotly
 
 # Utilities
 python-dotenv

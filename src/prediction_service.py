@@ -69,19 +69,7 @@ class PredictionService:
         self.uri = os.getenv("NEO4J_URI", "neo4j+ssc://c6226feb.databases.neo4j.io")
         self.auth = ("neo4j", os.getenv("NEO4J_PASSWORD", "8G7YN9W2V7Y_RQDCqWTHrryWd-G8GnNIF3ep9vslp6k"))
         
-        # 2. Regenerar datos con city_generator
-        print("   -> Regenerando datos sintéticos...")
-        try:
-            gen = CityGenerator(self.uri, self.auth)
-            personas, ubicaciones, warnings = gen.generate_data(num_personas=500, num_ubicaciones=15)
-            gen.save_to_neo4j(personas, ubicaciones, warnings)
-            gen.close()
-            print("   ✅ Datos regenerados exitosamente")
-        except Exception as e:
-            print(f"   ⚠️  Aviso al regenerar datos: {e}")
-            print("   Continuando con datos existentes en Neo4j...")
-        
-        # 3. Cargar Datos del Grafo (Snapshot actual)
+        # 2. Cargar Datos del Grafo (Snapshot actual de Neo4j, sin regenerar)
         print("   -> Loading graph data from Neo4j...")
         self.etl = PoliceETL(self.uri, self.auth)
         self.etl.load_nodes()
@@ -191,3 +179,76 @@ class PredictionService:
         
         print(f"   ✅ {len(predictions)} amenazas detectadas")
         return pd.DataFrame(predictions)
+    
+    def get_suspect_network(self, limit_nodes=20):
+        """
+        Obtiene una red de sospechosos basada en sus conexiones (COMETIO).
+        Retorna: (nodos_df, aristas_df) para construir un grafo.
+        """
+        try:
+            x_personas_cpu = self.data['Persona'].x.cpu()
+            
+            # Obtener todas las aristas de COMETIO
+            edge_index_cometio = self.data['Persona', 'COMETIO', 'Warning'].edge_index.cpu().numpy()
+            
+            if edge_index_cometio.shape[1] == 0:
+                # Si no hay relaciones COMETIO, crear un grafo con personas de alto riesgo
+                high_risk_indices = torch.where(x_personas_cpu[:, 0] > 0.5)[0].numpy()[:limit_nodes]
+                nodos = []
+                for idx in high_risk_indices:
+                    nodos.append({
+                        'id': f'P_{idx}',
+                        'risk': x_personas_cpu[idx, 0].item(),
+                        'label': f"P_{idx}\n(Risk: {x_personas_cpu[idx, 0]:.2f})"
+                    })
+                return pd.DataFrame(nodos), pd.DataFrame(columns=['source', 'target'])
+            
+            # Obtener personas únicas que tienen conexiones
+            personas_conectadas = set(edge_index_cometio[0].tolist())
+            personas_conectadas = list(personas_conectadas)[:limit_nodes]
+            
+            # Crear nodos
+            nodos = []
+            for p_idx in personas_conectadas:
+                risk = x_personas_cpu[p_idx, 0].item()
+                nodos.append({
+                    'id': f'P_{p_idx}',
+                    'risk': risk,
+                    'label': f"P_{p_idx}\n(Risk: {risk:.2f})"
+                })
+            
+            # Crear aristas basadas en crímenes comunes en ubicaciones
+            aristas = []
+            personas_set = set(personas_conectadas)
+            
+            for i in range(edge_index_cometio.shape[1]):
+                p1_idx = edge_index_cometio[0, i]
+                w_idx = edge_index_cometio[1, i]
+                
+                # Buscar otros crímenes en la misma ubicación por otras personas
+                for j in range(edge_index_cometio.shape[1]):
+                    if i != j:
+                        p2_idx = edge_index_cometio[0, j]
+                        if p1_idx in personas_set and p2_idx in personas_set and p1_idx != p2_idx:
+                            # Simplificar: crear arista si comparten un crimen similar (ubicación)
+                            source = f"P_{p1_idx}"
+                            target = f"P_{p2_idx}"
+                            # Evitar duplicados
+                            if not any((a['source'] == source and a['target'] == target) or 
+                                      (a['source'] == target and a['target'] == source) for a in aristas):
+                                aristas.append({'source': source, 'target': target})
+            
+            # Si no hay aristas, conectar por riesgo
+            if not aristas:
+                sorted_personas = sorted(personas_conectadas, key=lambda p: x_personas_cpu[p, 0].item(), reverse=True)
+                for i in range(len(sorted_personas) - 1):
+                    aristas.append({
+                        'source': f'P_{sorted_personas[i]}',
+                        'target': f'P_{sorted_personas[i+1]}'
+                    })
+            
+            return pd.DataFrame(nodos), pd.DataFrame(aristas)
+            
+        except Exception as e:
+            print(f"   ⚠️ Error obteniendo red de sospechosos: {e}")
+            return pd.DataFrame(), pd.DataFrame()
