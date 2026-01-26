@@ -180,6 +180,40 @@ class PredictionService:
         print(f"   ✅ {len(predictions)} amenazas detectadas")
         return pd.DataFrame(predictions)
     
+    def get_crime_stats(self):
+        """
+        Obtiene estadísticas de crímenes reales (Warnings) en la base de datos.
+        Retorna dict con métricas para calcular tasa de mitigación.
+        """
+        try:
+            # Contar Warnings existentes (crímenes que SÍ ocurrieron)
+            warnings_count = len(self.data['Warning'].x) if 'Warning' in self.data.node_types else 0
+            
+            # Contar personas de alto riesgo
+            x_personas_cpu = self.data['Persona'].x.cpu()
+            high_risk_count = torch.sum(x_personas_cpu[:, 0] > 0.5).item()
+            
+            # Contar ubicaciones peligrosas
+            x_ubicaciones_cpu = self.data['Ubicacion'].x.cpu()
+            dangerous_locations = torch.sum(x_ubicaciones_cpu[:, 0] > 0.5).item()
+            
+            return {
+                'warnings_count': warnings_count,  # Crímenes reales cometidos
+                'high_risk_personas': high_risk_count,
+                'dangerous_locations': dangerous_locations,
+                'total_personas': len(x_personas_cpu),
+                'total_ubicaciones': len(x_ubicaciones_cpu)
+            }
+        except Exception as e:
+            print(f"   ⚠️ Error obteniendo estadísticas de crimen: {str(e)}")
+            return {
+                'warnings_count': 0,
+                'high_risk_personas': 0,
+                'dangerous_locations': 0,
+                'total_personas': 0,
+                'total_ubicaciones': 0
+            }
+    
     def get_suspect_network(self, limit_nodes=20):
         """
         Obtiene una red de sospechosos basada en sus conexiones (COMETIO).

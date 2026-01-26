@@ -551,6 +551,16 @@ kpi_mitigation_rate = pn.pane.Markdown(
     sizing_mode='stretch_width'
 )
 
+# KPI: PERSONAS DE ALTO RIESGO DETECTADAS
+kpi_high_risk_personas = pn.pane.Markdown(
+    "<div style='text-align:center; border: 2px solid #FF8C00; border-radius:8px; padding:10px;'>" +
+    "<p style='color:#888; font-size:12pt; margin:0;'>PERFILES DE ALTO RIESGO</p>" +
+    "<h1 style='color:#FF8C00; font-size:32pt; margin:5px 0; text-shadow: 0 0 15px #FF8C00;'>0</h1>" +
+    "<p style='color:#FF8C00; font-size:10pt; margin:0;'>EN MONITOREO ACTIVO</p>" +
+    "</div>",
+    sizing_mode='stretch_width'
+)
+
 # Contenedor de gráficos
 row_plots = pn.Row(min_height=350, sizing_mode='stretch_width')
 
@@ -623,6 +633,10 @@ def run_prediction(event):
         # Llamada al servicio con umbrales más bajos para obtener más predicciones
         df_pred = service.predict_threats(risk_threshold=0.4, danger_threshold=0.3)
         
+        print("\n" + "="*60)
+        print("📊 CÁLCULO DE MÉTRICAS DE MITIGACIÓN (SISTEMA REAL)")
+        print("="*60)
+        
         if df_pred.empty:
             pn.state.notifications.success("Análisis completado: Ciudad Segura.")
             
@@ -640,6 +654,13 @@ def run_prediction(event):
             kpi_prob_label.object = "<div style='text-align:center;'><p style='color:#888; font-size:12pt; margin:0;'>Nivel de Riesgo</p><h2 style='color:#00FF00; font-size:24pt; margin:5px 0;'>BAJO</h2></div>"
             kpi_threat_index.value = 0
             kpi_critical_zone.object = "<div style='text-align:center;'><p style='color:#888; font-size:12pt; margin:0;'>Zona Crítica</p><h2 style='color:#00FFFF; font-size:24pt; margin:5px 0;'>-</h2></div>"
+            kpi_high_risk_personas.object = (
+                "<div style='text-align:center; border: 2px solid #00FF00; border-radius:8px; padding:10px;'>" +
+                "<p style='color:#888; font-size:12pt; margin:0;'>PERFILES DE ALTO RIESGO</p>" +
+                "<h1 style='color:#00FF00; font-size:32pt; margin:5px 0; text-shadow: 0 0 15px #00FF00;'>0</h1>" +
+                "<p style='color:#00FF00; font-size:10pt; margin:0;'>CIUDAD SEGURA</p>" +
+                "</div>"
+            )
             row_plots.objects = [pn.pane.Markdown("### 🛡️ Sin actividad criminal detectada.")]
             network_plot.clear()
             network_plot.append(pn.pane.Markdown("### 🛡️ Sin red de sospechosos."))
@@ -683,10 +704,42 @@ def run_prediction(event):
             # ACTUALIZAR GAUGE DE AMENAZA INMINENTE (colores automáticos por configuración)
             kpi_threat_index.value = threat_index_percent
             
-            # ACTUALIZAR KPI DE TASA DE MITIGACIÓN (dinámico)
-            # Lógica dummy: Asumimos que neutralizamos la mayoría de amenazas
-            amenazas_neutralizadas = max(1, int(count * 0.965))  # 96.5% mitigado
-            tasa_mitigacion = (amenazas_neutralizadas / count) * 100 if count > 0 else 96.5
+            # ACTUALIZAR KPI DE TASA DE MITIGACIÓN (MÉTRICAS REALES)
+            # Obtener estadísticas de crímenes reales desde Neo4j
+            crime_stats = service.get_crime_stats()
+            warnings_reales = crime_stats['warnings_count']  # Crímenes que SÍ ocurrieron
+            amenazas_detectadas = count  # Predicciones del modelo
+            
+            print(f"🎯 Amenazas detectadas por el modelo GNN: {amenazas_detectadas}")
+            print(f"⚠️  Crímenes reales en Neo4j (Warnings): {warnings_reales}")
+            print(f"👥 Personas de alto riesgo detectadas: {crime_stats['high_risk_personas']}")
+            
+            # Actualizar KPI de personas de alto riesgo
+            high_risk_count = crime_stats['high_risk_personas']
+            risk_persona_color = "#FF0033" if high_risk_count > 200 else "#FF8C00" if high_risk_count > 100 else "#FFA500"
+            kpi_high_risk_personas.object = (
+                f"<div style='text-align:center; border: 2px solid {risk_persona_color}; border-radius:8px; padding:10px;'>" +
+                f"<p style='color:#888; font-size:12pt; margin:0;'>PERFILES DE ALTO RIESGO</p>" +
+                f"<h1 style='color:{risk_persona_color}; font-size:32pt; margin:5px 0; text-shadow: 0 0 15px {risk_persona_color};'>{high_risk_count}</h1>" +
+                f"<p style='color:{risk_persona_color}; font-size:10pt; margin:0;'>EN MONITOREO ACTIVO</p>" +
+                f"<p style='color:#555; font-size:8pt; margin:5px 0;'>Risk > 0.5 | Total: {crime_stats['total_personas']}</p>" +
+                "</div>"
+            )
+            
+            # Lógica: Amenazas neutralizadas = Detectadas - Crímenes reales
+            # (Asumimos que las predicciones sin Warning asociado fueron prevenidas)
+            if amenazas_detectadas > 0:
+                # Calcular tasa: proporción de amenazas que NO se convirtieron en crímenes
+                amenazas_neutralizadas = max(0, amenazas_detectadas - warnings_reales)
+                tasa_mitigacion = (amenazas_neutralizadas / amenazas_detectadas) * 100
+            else:
+                tasa_mitigacion = 100.0  # Sin amenazas = control total
+                amenazas_neutralizadas = 0
+            
+            print(f"✅ Amenazas neutralizadas: {amenazas_neutralizadas}")
+            print(f"📈 Tasa de mitigación calculada: {tasa_mitigacion:.1f}%")
+            print(f"   Fórmula: ({amenazas_neutralizadas} / {amenazas_detectadas}) × 100")
+            print("="*60 + "\n")
             
             # Color según eficacia
             if tasa_mitigacion >= 95:
@@ -704,6 +757,7 @@ def run_prediction(event):
                 f"<p style='color:#888; font-size:12pt; margin:0;'>TASA DE MITIGACIÓN</p>" +
                 f"<h1 style='color:{mitigation_color}; font-size:32pt; margin:5px 0; text-shadow: 0 0 15px {mitigation_color};'>{tasa_mitigacion:.1f}%</h1>" +
                 f"<p style='color:{mitigation_color}; font-size:10pt; margin:0;'>ESTADO: {mitigation_status}</p>" +
+                f"<p style='color:#555; font-size:8pt; margin:5px 0;'>Detectadas: {amenazas_detectadas} | Neutralizadas: {amenazas_neutralizadas} | Crímenes Reales: {warnings_reales}</p>" +
                 "</div>"
             )
                 
@@ -890,6 +944,10 @@ template = pn.template.MaterialTemplate(
             pn.Card(kpi_prob_label, title="", sizing_mode='stretch_width', styles={'background': '#0a0a0a'}),
             pn.Card(kpi_critical_zone, title="", sizing_mode='stretch_width', styles={'background': '#0a0a0a'}),
             pn.Card(kpi_mitigation_rate, title="", sizing_mode='stretch_width', styles={'background': '#0a0a0a'}),
+            sizing_mode='stretch_width'
+        ),
+        pn.Row(
+            pn.Card(kpi_high_risk_personas, title="", sizing_mode='stretch_width', styles={'background': '#0a0a0a'}),
             sizing_mode='stretch_width'
         ),
         pn.Row(
