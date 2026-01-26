@@ -1,8 +1,8 @@
 from neo4j import GraphDatabase
 
 # TUS CREDENCIALES (Las mismas que en city_generator)
-URI = "neo4j+ssc://5d9c9334.databases.neo4j.io"
-AUTH = ("neo4j", "oTzaPYT99TgH-GM2APk0gcFlf9k16wrTcVOhtfmAyyA")
+URI = "neo4j+ssc://c6226feb.databases.neo4j.io"
+AUTH = ("neo4j", "8G7YN9W2V7Y_RQDCqWTHrryWd-G8GnNIF3ep9vslp6k")
 
 def nuke_database():
     print("☢️  INICIANDO PROTOCOLO DE LIMPIEZA TOTAL...")

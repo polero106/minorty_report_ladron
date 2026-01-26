@@ -64,13 +64,12 @@ def ejecutar_prediccion():
     print("=====================================================")
 
     # 1. Cargar Datos de la Ciudad (Neo4j)
-    URI = os.getenv("NEO4J_URI", "neo4j+ssc://5d9c9334.databases.neo4j.io")
-    AUTH = ("neo4j", os.getenv("NEO4J_PASSWORD", "oTzaPYT99TgH-GM2APk0gcFlf9k16wrTcVOhtfmAyyA"))
+    URI = os.getenv("NEO4J_URI", "neo4j+ssc://c6226feb.databases.neo4j.io")
+    AUTH = ("neo4j", os.getenv("NEO4J_PASSWORD", "8G7YN9W2V7Y_RQDCqWTHrryWd-G8GnNIF3ep9vslp6k"))
     
     print("   -> Regenerando datos sintéticos...")
     try:
         gen = CityGenerator(URI, AUTH)
-        gen.clear_database()  # Limpiar primero
         personas, ubicaciones, warnings = gen.generate_data(num_personas=500, num_ubicaciones=15)
         gen.save_to_neo4j(personas, ubicaciones, warnings)
         gen.close()

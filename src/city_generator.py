@@ -7,8 +7,8 @@ from faker import Faker
 from neo4j import GraphDatabase
 
 # Configuración (Cámbialo con tus datos de Aura o Local)
-URI = "neo4j+ssc://5d9c9334.databases.neo4j.io"
-AUTH = ("neo4j", "oTzaPYT99TgH-GM2APk0gcFlf9k16wrTcVOhtfmAyyA")
+URI = "neo4j+ssc://c6226feb.databases.neo4j.io"
+AUTH = ("neo4j", "8G7YN9W2V7Y_RQDCqWTHrryWd-G8GnNIF3ep9vslp6k")
 
 class CityGenerator:
     def __init__(self, uri, auth):
@@ -23,17 +23,6 @@ class CityGenerator:
         self.nodes = list(self.G.nodes(data=True)) # Lista de tuplas: (node_id, atributos)
         
         print(f"Matrix Real Cargada: {len(self.nodes)} intersecciones de Madrid listas.")
-
-    def clear_database(self):
-        """Limpia todos los nodos y relaciones de Neo4j"""
-        print("   -> Limpiando base de datos...")
-        with self.driver.session() as session:
-            try:
-                # Eliminar todas las relaciones y nodos
-                session.run("MATCH (n) DETACH DELETE n")
-                print("   ✅ Base de datos limpia")
-            except Exception as e:
-                print(f"   ⚠️  Error al limpiar: {e}")
 
     def close(self):
         self.driver.close()

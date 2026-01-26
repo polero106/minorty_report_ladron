@@ -99,8 +99,8 @@ def entrenar_policia():
     
     # --- REGENERAR DATOS CON CITY GENERATOR ---
     print("\n🏗️  PASO 1: Regenerando datos sintéticos...")
-    URI = os.getenv("NEO4J_URI", "neo4j+ssc://5d9c9334.databases.neo4j.io")
-    AUTH = ("neo4j", os.getenv("NEO4J_PASSWORD", "oTzaPYT99TgH-GM2APk0gcFlf9k16wrTcVOhtfmAyyA"))
+    URI = os.getenv("NEO4J_URI", "neo4j+ssc://c6226feb.databases.neo4j.io")
+    AUTH = ("neo4j", os.getenv("NEO4J_PASSWORD", "8G7YN9W2V7Y_RQDCqWTHrryWd-G8GnNIF3ep9vslp6k"))
     
     try:
         gen = CityGenerator(URI, AUTH)

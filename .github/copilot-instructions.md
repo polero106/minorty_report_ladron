@@ -65,7 +65,7 @@ gen.generate_data(num_personas=1000, num_ubicaciones=50)
 ### Neo4j Connection
 - **Local**: `docker-compose.yml` con APOC habilitado
 - **Cloud**: Credenciales en `.env`: `NEO4J_URI` y `NEO4J_PASSWORD`
-- **Default**: `neo4j+ssc://5d9c9334.databases.neo4j.io` (AuraDB)
+- **Default**: `neo4j+ssc://c6226feb.databases.neo4j.io` (AuraDB)
 
 ### Python Environment
 ```bash

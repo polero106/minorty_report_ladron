@@ -22,26 +22,6 @@ def denormalize_lat(y):
 def denormalize_lon(x): 
     return x * (LON_MAX - LON_MIN) + LON_MIN
 
-# Mapeo Ficticio de Barrios
-BARRIOS = {
-    0: "Centro", 1: "Arganzuela", 2: "Retiro", 3: "Salamanca", 
-    4: "Chamartín", 5: "Tetuán", 6: "Chamberí", 7: "Fuencarral-El Pardo",
-    8: "Moncloa-Aravaca", 9: "Latina", 10: "Carabanchel", 11: "Usera",
-    12: "Puente de Vallecas", 13: "Moratalaz", 14: "Ciudad Lineal",
-    15: "Hortaleza", 16: "Villaverde", 17: "Villa de Vallecas",
-    18: "Vicálvaro", 19: "San Blas-Canillejas", 20: "Barajas"
-}
-
-def get_barrio_name(u_id_str):
-    """Convierte 'U_10' -> 'Carabanchel'"""
-    try:
-        # Extraer número del ID string (ej: U_10 -> 10)
-        idx = int(str(u_id_str).split('_')[1])
-        # Usar módulo para asignar un nombre siempre
-        return BARRIOS.get(idx % 21, f"Distrito {idx}")
-    except:
-        return "Zona Desconocida"
-
 # ==============================================================================
 # 1. CONFIGURACIÓN E INICIALIZACIÓN
 # ==============================================================================
@@ -91,7 +71,7 @@ if service:
         'lat': denormalize_lat(x_locs[:, 1]),
         'lon': denormalize_lon(x_locs[:, 2]),
         'tipo': 'Ubicación',
-        'id_visual': [f'{get_barrio_name(f"U_{i}")}' for i in range(len(x_locs))]
+        'id_visual': [f'U_{i}' for i in range(len(x_locs))]
     })
     
     # Obtener nodos Warning (Crímenes) - necesitamos mapearlos a ubicaciones
@@ -204,8 +184,8 @@ def run_prediction(event):
     btn_predict.name = "PROCESANDO..."
     
     try:
-        # Llamada al servicio
-        df_pred = service.predict_threats(risk_threshold=0.6, danger_threshold=0.5)
+        # Llamada al servicio con umbrales más bajos para obtener más predicciones
+        df_pred = service.predict_threats(risk_threshold=0.4, danger_threshold=0.3)
         
         if df_pred.empty:
             pn.state.notifications.success("Análisis completado: Ciudad Segura.")
@@ -252,24 +232,12 @@ def run_prediction(event):
             else:
                 kpi_prob_label.value = "RIESGO MEDIO"
                 
-            # 3. KPI ZONA CRÍTICA (Nombre Real)
+            # 3. KPI ZONA CRÍTICA (ID Simple)
             top_zone_id = df_pred['id_ubicacion'].mode()[0]
-            kpi_critical_zone.value = get_barrio_name(top_zone_id)
+            kpi_critical_zone.value = top_zone_id
             
             # 4. ACTUALIZAR MAPA
-            # Capa 1: Arcos de amenaza
-            layer_arcs = pdk.Layer(
-                "ArcLayer",
-                data=df_pred,
-                get_source_position=["lon_sujeto", "lat_sujeto"],
-                get_target_position=["lon_ubicacion", "lat_ubicacion"],
-                get_source_color=[0, 255, 255, 80], # Cyan tenue
-                get_target_color=[255, 0, 0, 200],  # Rojo intenso
-                get_width=2,
-                pickable=True
-            )
-            
-            # Capa 2: Puntos de impacto (Crimen previsto)
+            # Solo puntos de impacto (Crímenes previstos) - SIN arcos
             layer_crimes = pdk.Layer(
                 "ScatterplotLayer",
                 data=df_pred,
@@ -285,46 +253,30 @@ def run_prediction(event):
 
             deck_pane.object = pdk.Deck(
                 initial_view_state=INITIAL_VIEW_STATE,
-                layers=initial_layers + [layer_arcs, layer_crimes],
+                layers=initial_layers + [layer_crimes],
                 map_style=MAP_STYLE,
                 tooltip=TOOLTIP_CONFIG
             )
             
-            # 5. GRÁFICOS
-            # Ranking Top 5 Barrios (Bar Chart Horizontal)
-            # Primero mapeamos IDs a Nombres
-            df_pred['Barrio'] = df_pred['id_ubicacion'].apply(get_barrio_name)
+            # 5. GRÁFICO - Top 10 Ubicaciones con Más Amenazas (Barras)
+            df_amenazas = df_pred['id_ubicacion'].value_counts().head(10).reset_index()
+            df_amenazas.columns = ['Ubicación', 'Número de Amenazas']
+            df_amenazas = df_amenazas.sort_values(by='Número de Amenazas', ascending=True)
             
-            # Agrupar y contar
-            df_ranking = df_pred['Barrio'].value_counts().head(5).reset_index()
-            df_ranking.columns = ['Barrio', 'Amenazas']
-            df_ranking = df_ranking.sort_values(by='Amenazas', ascending=True) # Para que el Top 1 salga arriba en hbar
-            
-            bar_plot = df_ranking.hvplot.barh(
-                x='Barrio', 
-                y='Amenazas', 
-                title='🔥 Top 5 Zonas de Riesgo',
+            bar_plot = df_amenazas.hvplot.barh(
+                x='Ubicación', 
+                y='Número de Amenazas', 
+                title='🎯 Top 10 Ubicaciones con Más Amenazas Detectadas',
                 color='#ff0040',
-                height=300,
+                height=400,
                 responsive=True,
                 grid=True
-            ).opts(fontsize={'title': 14, 'labels': 12, 'xticks': 10, 'yticks': 10})
+            ).opts(
+                fontsize={'title': 14, 'labels': 12, 'xticks': 10, 'yticks': 10},
+                bgcolor='#1a1a1a'
+            )
             
-            heatmap_plot = df_pred.hvplot.points(
-                'lon_ubicacion', 
-                'lat_ubicacion', 
-                c='probabilidad',
-                cmap='inferno', 
-                size=80, 
-                title='🗺️ Mapa de Calor Criminal',
-                height=300,
-                responsive=True,
-                colorbar=True,
-                xaxis=None, 
-                yaxis=None
-            ).opts(bgcolor='#1a1a1a')
-            
-            row_plots.objects = [bar_plot, heatmap_plot]
+            row_plots.objects = [bar_plot]
 
     except Exception as e:
         error_msg = f"Error crítico: {str(e)}"

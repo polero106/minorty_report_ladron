@@ -10,8 +10,8 @@ from src.etl_policial import PoliceETL
 load_dotenv()
 
 def debug_data():
-    URI = os.getenv("NEO4J_URI", "neo4j+ssc://5d9c9334.databases.neo4j.io")
-    AUTH = ("neo4j", os.getenv("NEO4J_PASSWORD", "oTzaPYT99TgH-GM2APk0gcFlf9k16wrTcVOhtfmAyyA"))
+    URI = os.getenv("NEO4J_URI", "neo4j+ssc://c6226feb.databases.neo4j.io")
+    AUTH = ("neo4j", os.getenv("NEO4J_PASSWORD", "8G7YN9W2V7Y_RQDCqWTHrryWd-G8GnNIF3ep9vslp6k"))
     
     print("Loading data...")
     etl = PoliceETL(URI, AUTH)

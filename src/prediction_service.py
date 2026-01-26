@@ -66,14 +66,13 @@ class PredictionService:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
         # 1. Configuración DB
-        self.uri = os.getenv("NEO4J_URI", "neo4j+ssc://5d9c9334.databases.neo4j.io")
-        self.auth = ("neo4j", os.getenv("NEO4J_PASSWORD", "oTzaPYT99TgH-GM2APk0gcFlf9k16wrTcVOhtfmAyyA"))
+        self.uri = os.getenv("NEO4J_URI", "neo4j+ssc://c6226feb.databases.neo4j.io")
+        self.auth = ("neo4j", os.getenv("NEO4J_PASSWORD", "8G7YN9W2V7Y_RQDCqWTHrryWd-G8GnNIF3ep9vslp6k"))
         
         # 2. Regenerar datos con city_generator
         print("   -> Regenerando datos sintéticos...")
         try:
             gen = CityGenerator(self.uri, self.auth)
-            gen.clear_database()  # Limpiar primero
             personas, ubicaciones, warnings = gen.generate_data(num_personas=500, num_ubicaciones=15)
             gen.save_to_neo4j(personas, ubicaciones, warnings)
             gen.close()
@@ -129,7 +128,10 @@ class PredictionService:
         high_risk_indices = torch.where(x_personas_cpu[:, 0] > risk_threshold)[0].to(self.device)
         high_danger_indices = torch.where(x_ubicaciones_cpu[:, 0] > danger_threshold)[0].to(self.device)
         
+        print(f"   -> Candidatos filtrados: {len(high_risk_indices)} personas de riesgo, {len(high_danger_indices)} zonas peligrosas")
+        
         if len(high_risk_indices) == 0 or len(high_danger_indices) == 0:
+            print(f"   ⚠️ No hay suficientes candidatos (risk_threshold={risk_threshold}, danger_threshold={danger_threshold})")
             return pd.DataFrame() # Retorno vacío
             
         predictions = []
@@ -144,8 +146,8 @@ class PredictionService:
                 # Discriminador opina
                 probs = self.discriminator(p_emb, u_emb).flatten()
                 
-                # Filtrar solo prob > 0.8 (Alta certeza)
-                mask = probs > 0.80
+                # Filtrar solo prob > 0.5 (Umbral más bajo para obtener más predicciones)
+                mask = probs > 0.50
                 
                 if mask.any():
                     indices_validos = torch.where(mask)[0]
@@ -153,28 +155,39 @@ class PredictionService:
                         u_real_idx = high_danger_indices[idx]
                         prob = probs[idx].item()
                         
-                        # Recuperar IDs originales y Coordenadas
-                        # Nota: El ETL guarda mapas de ID originales, pero aquí usaremos indices
-                        # Recuperamos Lat/Lon de los features normalizados (indices 1 y 2)
-                        # OJO: Para visualización real necesitaríamos des-normalizar si las guardamos normalizadas.
-                        # Asumiremos que el ETL las tiene en raw en alguna parte o que data.x tiene lat/lon usables.
-                        # Para este ejemplo, usaremos las lat/lon que el ETL cargó en los tensores.
+                        # Recuperar coordenadas normalizadas y des-normalizarlas
+                        # Features: [risk/danger, lat_norm, lon_norm]
+                        LAT_MIN, LAT_MAX = 40.30, 40.55
+                        LON_MIN, LON_MAX = -3.85, -3.50
+                        
+                        lat_norm_p = x_personas_cpu[p_idx, 1].item()
+                        lon_norm_p = x_personas_cpu[p_idx, 2].item()
+                        lat_norm_u = x_ubicaciones_cpu[u_real_idx, 1].item()
+                        lon_norm_u = x_ubicaciones_cpu[u_real_idx, 2].item()
+                        
+                        # Des-normalizar
+                        lat_sujeto = lat_norm_p * (LAT_MAX - LAT_MIN) + LAT_MIN
+                        lon_sujeto = lon_norm_p * (LON_MAX - LON_MIN) + LON_MIN
+                        lat_ubicacion = lat_norm_u * (LAT_MAX - LAT_MIN) + LAT_MIN
+                        lon_ubicacion = lon_norm_u * (LON_MAX - LON_MIN) + LON_MIN
                         
                         predictions.append({
                             "id_sujeto": f"P_{p_idx.item()}",
                             "riesgo_sujeto": x_personas_cpu[p_idx, 0].item(),
-                            "lat_sujeto": x_personas_cpu[p_idx, 1].item(), # Asumiendo idx 1 es Lat
-                            "lon_sujeto": x_personas_cpu[p_idx, 2].item(), # Asumiendo idx 2 es Lon
+                            "lat_sujeto": lat_sujeto,
+                            "lon_sujeto": lon_sujeto,
                             
                             "id_ubicacion": f"U_{u_real_idx.item()}",
                             "peligrosidad_zona": x_ubicaciones_cpu[u_real_idx, 0].item(),
-                            "lat_ubicacion": x_ubicaciones_cpu[u_real_idx, 1].item(),
-                            "lon_ubicacion": x_ubicaciones_cpu[u_real_idx, 2].item(),
+                            "lat_ubicacion": lat_ubicacion,
+                            "lon_ubicacion": lon_ubicacion,
                             
                             "probabilidad": prob
                         })
 
         if not predictions:
+            print("   ⚠️ No se generaron predicciones (umbral de probabilidad no alcanzado)")
             return pd.DataFrame()
-            
+        
+        print(f"   ✅ {len(predictions)} amenazas detectadas")
         return pd.DataFrame(predictions)
