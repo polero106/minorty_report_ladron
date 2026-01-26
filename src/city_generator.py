@@ -86,9 +86,10 @@ class CityGenerator:
             })
 
         # ---------------------------------------------------------
-        # 3. GENERAR WARNINGS (Crímenes) - CON COHERENCIA ESPACIAL
+        # 3. GENERAR WARNINGS (Crímenes) - EN CUALQUIER PARTE DE MADRID
         # ---------------------------------------------------------
-        # Lógica: Los crímenes ocurren EN o MUY CERCA de una Ubicación existente.
+        # Lógica: Los crímenes pueden ocurrir en cualquier lugar de Madrid, 
+        # NO necesariamente dentro de ubicaciones específicas.
         warnings = []
         
         # Filtramos criminales potenciales (Risk Seed alta)
@@ -99,14 +100,13 @@ class CityGenerator:
             # Probabilidad de cometer crimen basada en su risk_seed (muy baja)
             if random.random() < (crim['risk_seed'] * 0.2): 
                 
-                # SELECCIONAR ESCENA DEL CRIMEN
-                # El crimen ocurre en una de las ubicaciones generadas (o muy cerca)
-                scene = random.choice(ubicaciones)
+                # UBICACIÓN DEL CRIMEN: CUALQUIER PUNTO DE MADRID
+                # Generamos coordenadas completamente aleatorias en Madrid
+                crime_coords = self.get_real_madrid_point()
                 
-                # Añadir Jitter (Variación aleatoria de ~10 metros)
-                # 0.0001 grados ~ 11 metros
-                jitter_lat = random.uniform(-0.0001, 0.0001)
-                jitter_lon = random.uniform(-0.0001, 0.0001)
+                # Seleccionar una ubicación ALEATORIA como referencia geográfica 
+                # (pero el crimen NO ocurre necesariamente en ella)
+                scene = random.choice(ubicaciones)
                 
                 warnings.append({
                     'id': f"WARN_{random.randint(10000, 99999)}",
@@ -116,11 +116,11 @@ class CityGenerator:
                     'autor_id': crim['id'],
                     'scene_id': scene['id'], # Guardamos referencia para el grafo
                     
-                    # 2. COORDENADAS CRÍMENES (Warnings)
-                    # Heredan la pos de la ubicación + jitter
-                    'x': scene['x'] + jitter_lon, 
-                    'y': scene['y'] + jitter_lat,
-                    'z': scene['z'],
+                    # COORDENADAS CRÍMENES (Warnings): INDEPENDIENTES DE UBICACIONES
+                    # El crimen puede ocurrir en cualquier punto de Madrid
+                    'x': crime_coords['x'], 
+                    'y': crime_coords['y'],
+                    'z': crime_coords['z'],
                     'color': '#FF0000', # Rojo
                     'type': 'Crimen'
                 })

@@ -97,22 +97,10 @@ def entrenar_policia():
     print("Iniciando entrenamiento ADVERSARIO (GAN) - Pre-Crimen...")
     print("=" * 60)
     
-    # --- REGENERAR DATOS CON CITY GENERATOR ---
-    print("\n🏗️  PASO 1: Regenerando datos sintéticos...")
+    # --- CARGAR DATOS EXISTENTES (SIN REGENERAR) ---
+    print("\n🧠 PASO 1: Cargando datos existentes de Neo4j...")
     URI = os.getenv("NEO4J_URI", "neo4j+ssc://c6226feb.databases.neo4j.io")
     AUTH = ("neo4j", os.getenv("NEO4J_PASSWORD", "8G7YN9W2V7Y_RQDCqWTHrryWd-G8GnNIF3ep9vslp6k"))
-    
-    try:
-        gen = CityGenerator(URI, AUTH)
-        personas, ubicaciones, warnings = gen.generate_data(num_personas=500, num_ubicaciones=15)
-        gen.save_to_neo4j(personas, ubicaciones, warnings)
-        gen.close()
-        print("✅ Datos regenerados exitosamente en Neo4j")
-    except Exception as e:
-        print(f"⚠️  Aviso al regenerar datos: {e}")
-        print("   Continuando con datos existentes en Neo4j...")
-    
-    print("\n🧠 PASO 2: Cargando datos para entrenamiento...")
     # --- CARGAR DATOS ---
     etl = PoliceETL(URI, AUTH)
     etl.load_nodes()
